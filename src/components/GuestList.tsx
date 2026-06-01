@@ -6,6 +6,7 @@ type GuestListProps = {
   guests: Guest[];
   emptyTitle: string;
   emptyDescription: string;
+  layout?: "table" | "compact";
   onStateChange: (guestId: string, nextState: CheckInState) => void;
   onMarkPaid: (guestId: string) => void;
 };
@@ -14,6 +15,7 @@ export function GuestList({
   guests,
   emptyTitle,
   emptyDescription,
+  layout = "table",
   onMarkPaid,
   onStateChange,
 }: GuestListProps) {
@@ -28,17 +30,23 @@ export function GuestList({
 
   return (
     <div className="overflow-hidden rounded-md border border-stone-200 bg-white shadow-sm">
-      <div className="hidden grid-cols-[minmax(14rem,1.4fr)_minmax(9rem,0.8fr)_minmax(15rem,1.1fr)_minmax(17rem,1fr)] gap-4 border-b border-stone-200 bg-stone-50 px-4 py-3 text-xs font-bold uppercase text-stone-500 lg:grid">
-        <span>Guest</span>
-        <span>Phone</span>
-        <span>Status</span>
-        <span>Actions</span>
-      </div>
+      {layout === "table" ? (
+        <div className="hidden grid-cols-[minmax(14rem,1.4fr)_minmax(9rem,0.8fr)_minmax(15rem,1.1fr)_minmax(17rem,1fr)] gap-4 border-b border-stone-200 bg-stone-50 px-4 py-3 text-xs font-bold uppercase text-stone-500 lg:grid">
+          <span>Guest</span>
+          <span>Phone</span>
+          <span>Status</span>
+          <span>Actions</span>
+        </div>
+      ) : null}
 
       <div className="divide-y divide-stone-200">
         {guests.map((guest) => (
           <article
-            className="grid gap-4 px-4 py-4 lg:grid-cols-[minmax(14rem,1.4fr)_minmax(9rem,0.8fr)_minmax(15rem,1.1fr)_minmax(17rem,1fr)] lg:items-center"
+            className={
+              layout === "table"
+                ? "grid gap-4 px-4 py-4 lg:grid-cols-[minmax(14rem,1.4fr)_minmax(9rem,0.8fr)_minmax(15rem,1.1fr)_minmax(17rem,1fr)] lg:items-center"
+                : "grid gap-3 px-4 py-4"
+            }
             key={guest.id}
           >
             <div className="min-w-0">

@@ -77,6 +77,7 @@ export function GuestSearch({
         }
         emptyTitle={query.trim() ? "No matches" : "Ready for guest lookup"}
         guests={limitedMatches}
+        layout="compact"
         onMarkPaid={onMarkPaid}
         onStateChange={onStateChange}
       />
