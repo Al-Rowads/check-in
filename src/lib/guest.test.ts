@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Guest } from "../types/guest";
-import { getGuestStats, markGuestPaymentFull } from "./guest";
+import { getGuestStats, markGuestPaymentFull, updateGuestCheckInState } from "./guest";
 
 describe("guest payment helpers", () => {
   it("marks an incomplete payment as full and updates incomplete payment stats", () => {
@@ -10,6 +10,17 @@ describe("guest payment helpers", () => {
     expect(paidGuest.payment).toBe("full");
     expect(getGuestStats([unpaidGuest]).incompletePayment).toBe(1);
     expect(getGuestStats([paidGuest]).incompletePayment).toBe(0);
+  });
+});
+
+describe("guest check-in helpers", () => {
+  it("can mark a not-entered guest as left directly", () => {
+    const guest = makeGuest("1", "full");
+    const leftGuest = updateGuestCheckInState(guest, "left");
+
+    expect(leftGuest.checkInState).toBe("left");
+    expect(leftGuest.enteredAt).toBeDefined();
+    expect(leftGuest.leftAt).toBeDefined();
   });
 });
 

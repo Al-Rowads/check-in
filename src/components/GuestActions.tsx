@@ -18,7 +18,7 @@ export function GuestActions({ guest, onMarkPaid, onStateChange }: GuestActionsP
         Mark entered
       </Button>
       <Button
-        disabled={guest.checkInState !== "entered"}
+        disabled={guest.checkInState === "left"}
         onClick={() => onStateChange(guest.id, "left")}
         size="sm"
         variant="secondary"
