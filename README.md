@@ -61,8 +61,8 @@ docker run --rm -p 4173:4173 \
 ### Nginx reverse proxy
 
 An example host-level Nginx config is available at
-`deploy/nginx/event-check-in.conf`. Replace `checkin.example.com` with your
-domain and make sure the certificate paths match your TLS certificate.
+`deploy/nginx/event-check-in.conf` for `https://check-in.marioiran.info/`.
+Make sure the certificate paths match your TLS certificate.
 
 When Nginx is the public entry point, bind the Docker port to localhost so the
 Node server is not exposed directly:
@@ -83,7 +83,9 @@ sudo systemctl reload nginx
 
 The config proxies traffic to `http://127.0.0.1:4173`, redirects HTTP to HTTPS,
 and sets `client_max_body_size 30m` so Excel/CSV roster uploads work through
-Nginx.
+Nginx. The frontend uses same-origin `/api/...` requests by default, so the
+browser talks to `https://check-in.marioiran.info/api/...` instead of a separate
+API origin.
 
 For a production build:
 

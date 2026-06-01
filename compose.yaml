@@ -4,7 +4,7 @@ services:
       context: .
     image: event-check-in:local
     ports:
-      - "4173:4173"
+      - "127.0.0.1:4173:4173"
     environment:
       HOST: 0.0.0.0
       PORT: 4173

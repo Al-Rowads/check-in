@@ -2,7 +2,7 @@ import type { Guest } from "../types/guest";
 import type { UserRole } from "../config/auth";
 import { parseStoredGuests } from "./storage";
 
-const apiBaseUrl = (import.meta.env.VITE_CHECKIN_API_URL ?? "").replace(/\/$/, "");
+const configuredApiBaseUrl = import.meta.env.VITE_CHECKIN_API_URL ?? "";
 
 export type GoogleSheetSyncStatus = {
   enabled: boolean;
@@ -156,7 +156,40 @@ export async function saveGoogleSheetSyncUrl(
 }
 
 function apiUrl(path: string): string {
-  return `${apiBaseUrl}${path}`;
+  return `${resolveApiBaseUrl(configuredApiBaseUrl)}${path}`;
+}
+
+export function resolveApiBaseUrl(
+  configuredUrl: string,
+  currentOrigin = getCurrentOrigin(),
+): string {
+  const trimmedUrl = configuredUrl.trim().replace(/\/+$/, "");
+
+  if (!trimmedUrl) {
+    return "";
+  }
+
+  if (!currentOrigin) {
+    return trimmedUrl;
+  }
+
+  try {
+    const resolvedUrl = new URL(trimmedUrl, currentOrigin);
+    resolvedUrl.hash = "";
+    resolvedUrl.search = "";
+
+    if (resolvedUrl.origin === currentOrigin) {
+      return resolvedUrl.pathname.replace(/\/+$/, "");
+    }
+
+    return resolvedUrl.toString().replace(/\/+$/, "");
+  } catch {
+    return trimmedUrl;
+  }
+}
+
+function getCurrentOrigin(): string {
+  return typeof window === "undefined" ? "" : window.location.origin;
 }
 
 function authHeaders(authToken: string): Record<string, string> {
