@@ -60,6 +60,10 @@ Required fields:
 
 The importer normalizes headers, trims extra whitespace, validates required values, and allows duplicate rows or duplicate phone numbers.
 
+Uploading a roster refreshes the active guest list instead of appending to the
+previous import. Guests with the same normalized phone number and name keep their
+check-in state, timestamps, and any payment marked as full in the app.
+
 Guests with incomplete payment can be marked as paid from the guest row actions. This updates the payment badge, incomplete payment statistic, and `Not fully paid` filter immediately.
 
 ## Search Behavior

@@ -1,4 +1,10 @@
-import type { CheckInState, DashboardStats, Guest, GuestFilter } from "../types/guest";
+import type {
+  CheckInState,
+  DashboardStats,
+  Guest,
+  GuestFilter,
+  GuestImportCandidate,
+} from "../types/guest";
 
 export function createGuestId(normalizedPhoneNumber: string): string {
   if (globalThis.crypto?.randomUUID) {
@@ -113,6 +119,53 @@ export function markGuestPaymentFull(guest: Guest): Guest {
   };
 }
 
+export function refreshGuestRoster(
+  currentGuests: Guest[],
+  candidates: GuestImportCandidate[],
+): Guest[] {
+  const existingGuestsByKey = currentGuests.reduce<Map<string, Guest[]>>((guestsByKey, guest) => {
+    const key = getRosterIdentityKey(guest);
+    const existingGuests = guestsByKey.get(key);
+
+    if (existingGuests) {
+      existingGuests.push(guest);
+    } else {
+      guestsByKey.set(key, [guest]);
+    }
+
+    return guestsByKey;
+  }, new Map());
+
+  return candidates.map<Guest>((candidate) => {
+    const key = getRosterIdentityKey(candidate);
+    const matchedGuest = existingGuestsByKey.get(key)?.shift();
+    const guest: Guest = {
+      ...candidate,
+      id: matchedGuest?.id ?? candidate.id ?? createGuestId(candidate.normalizedPhoneNumber),
+    };
+
+    if (!matchedGuest) {
+      return guest;
+    }
+
+    const refreshedGuest: Guest = {
+      ...guest,
+      checkInState: matchedGuest.checkInState,
+      payment: matchedGuest.payment === "full" ? "full" : guest.payment,
+    };
+
+    if (matchedGuest.enteredAt && matchedGuest.checkInState !== "not_entered") {
+      refreshedGuest.enteredAt = matchedGuest.enteredAt;
+    }
+
+    if (matchedGuest.leftAt && matchedGuest.checkInState === "left") {
+      refreshedGuest.leftAt = matchedGuest.leftAt;
+    }
+
+    return refreshedGuest;
+  });
+}
+
 export function sortGuestsForDesk(guests: Guest[]): Guest[] {
   return [...guests].sort((first, second) => {
     const stateOrder = stateSortValue(first.checkInState) - stateSortValue(second.checkInState);
@@ -134,4 +187,14 @@ function stateSortValue(state: CheckInState): number {
     case "left":
       return 2;
   }
+}
+
+function getRosterIdentityKey(
+  guest: Pick<Guest, "name" | "normalizedPhoneNumber">,
+): string {
+  return JSON.stringify([guest.normalizedPhoneNumber, normalizeGuestName(guest.name)]);
+}
+
+function normalizeGuestName(name: string): string {
+  return name.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }

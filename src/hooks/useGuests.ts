@@ -4,6 +4,7 @@ import {
   createGuestId,
   getGuestStats,
   markGuestPaymentFull,
+  refreshGuestRoster,
   updateGuestCheckInState,
 } from "../lib/guest";
 import { loadGuestsFromStorage, saveGuestsToStorage } from "../lib/storage";
@@ -22,15 +23,15 @@ export function useGuests() {
 
   const importGuests = useCallback(
     (candidates: GuestImportCandidate[]): ImportGuestsResult => {
-      const importedGuests = candidates.map<Guest>((candidate) => ({
+      const candidatesWithIds = candidates.map<GuestImportCandidate>((candidate) => ({
         ...candidate,
         id: candidate.id ?? createGuestId(candidate.normalizedPhoneNumber),
       }));
 
-      setGuests((currentGuests) => [...currentGuests, ...importedGuests]);
+      setGuests((currentGuests) => refreshGuestRoster(currentGuests, candidatesWithIds));
 
       return {
-        importedCount: importedGuests.length,
+        importedCount: candidatesWithIds.length,
       };
     },
     [],
