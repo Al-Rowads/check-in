@@ -4,24 +4,32 @@ import { Button } from "./Button";
 import { Field, TextInput } from "./Field";
 
 type LoginScreenProps = {
-  onLogin: (username: string, password: string) => { ok: true } | { ok: false; message: string };
+  onLogin: (
+    username: string,
+    password: string,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
 };
 
 export function LoginScreen({ onLogin }: LoginScreenProps) {
   const [username, setUsername] = useState<string>(ADMIN_CREDENTIALS.username);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const result = onLogin(username, password);
+    setIsLoggingIn(true);
+
+    const result = await onLogin(username, password);
 
     if (!result.ok) {
       setError(result.message);
+      setIsLoggingIn(false);
       return;
     }
 
     setError(null);
+    setIsLoggingIn(false);
   }
 
   return (
@@ -59,8 +67,8 @@ export function LoginScreen({ onLogin }: LoginScreenProps) {
             </div>
           ) : null}
 
-          <Button className="w-full" type="submit">
-            Log in
+          <Button className="w-full" disabled={isLoggingIn} type="submit">
+            {isLoggingIn ? "Logging in..." : "Log in"}
           </Button>
         </form>
       </section>

@@ -1,0 +1,20 @@
+services:
+  check-in:
+    build:
+      context: .
+    image: event-check-in:local
+    ports:
+      - "4173:4173"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 4173
+      CHECKIN_DATA_DIR: /app/data
+      CHECKIN_ADMIN_USERNAME: admin
+      CHECKIN_ADMIN_PASSWORD: checkin2026
+      CHECKIN_USER_USERNAME: user
+      CHECKIN_USER_PASSWORD: user2026
+      CHECKIN_GOOGLE_SHEET_URL: https://docs.google.com/spreadsheets/d/1VF6IKmYBQzLBrHDNk9OFFraaI0KQlp5kkEkmBTfQhLQ/edit?usp=drivesdk
+      CHECKIN_GOOGLE_SHEET_SYNC_INTERVAL_MS: 300000
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

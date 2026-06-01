@@ -12,11 +12,7 @@ export function loadGuestsFromStorage(): Guest[] {
   try {
     const parsed: unknown = JSON.parse(stored);
 
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-
-    return parsed.filter(isStoredGuest);
+    return parseStoredGuests(parsed);
   } catch {
     return [];
   }
@@ -26,7 +22,15 @@ export function saveGuestsToStorage(guests: Guest[]): void {
   localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(guests));
 }
 
-function isStoredGuest(value: unknown): value is Guest {
+export function parseStoredGuests(value: unknown): Guest[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(isStoredGuest);
+}
+
+export function isStoredGuest(value: unknown): value is Guest {
   if (!value || typeof value !== "object") {
     return false;
   }

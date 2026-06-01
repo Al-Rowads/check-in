@@ -1,10 +1,13 @@
 import { ChangeEvent, useRef, useState } from "react";
 import type { GuestImportCandidate, ImportError } from "../types/guest";
 import { parseRosterFile } from "../lib/excel";
-import type { ImportGuestsResult } from "../hooks/useGuests";
+import type { GoogleSheetSyncResult, ImportGuestsResult } from "../hooks/useGuests";
+import { Button } from "./Button";
+import { Field, TextInput } from "./Field";
 
 type ImportPanelProps = {
-  onImport: (guests: GuestImportCandidate[]) => ImportGuestsResult;
+  onImport: (guests: GuestImportCandidate[], rosterFile: File) => Promise<ImportGuestsResult>;
+  onSyncGoogleSheet: (url: string) => Promise<GoogleSheetSyncResult>;
   onToast: (toast: {
     title: string;
     description?: string;
@@ -18,12 +21,14 @@ type ImportSummary = {
 
 const allowedRosterExtensions = [".xlsx", ".xls", ".csv"];
 
-export function ImportPanel({ onImport, onToast }: ImportPanelProps) {
+export function ImportPanel({ onImport, onSyncGoogleSheet, onToast }: ImportPanelProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isParsing, setIsParsing] = useState(false);
+  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
   const [errors, setErrors] = useState<ImportError[]>([]);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [googleSheetUrl, setGoogleSheetUrl] = useState("");
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -67,14 +72,14 @@ export function ImportPanel({ onImport, onToast }: ImportPanelProps) {
         return;
       }
 
-      const importResult = onImport(result.guests);
+      const importResult = await onImport(result.guests, file);
 
       setSummary({
         importedCount: importResult.importedCount,
       });
       onToast({
         title: "Roster refreshed",
-        description: `${importResult.importedCount} ${importResult.importedCount === 1 ? "guest is" : "guests are"} in the active roster.`,
+        description: `${importResult.importedCount} ${importResult.importedCount === 1 ? "guest is" : "guests are"} in the active roster. ${importResult.savedToHost ? "Saved on host." : "Saved in this browser only."}`,
         tone: "success",
       });
       clearFileInput();
@@ -87,6 +92,53 @@ export function ImportPanel({ onImport, onToast }: ImportPanelProps) {
       });
     } finally {
       setIsParsing(false);
+    }
+  }
+
+  async function handleGoogleSheetSync() {
+    const url = googleSheetUrl.trim();
+
+    if (!url) {
+      onToast({
+        title: "Google Sheet link needed",
+        description: "Paste a public Google Sheets link first.",
+        tone: "warning",
+      });
+      return;
+    }
+
+    setErrors([]);
+    setSummary(null);
+    setIsSyncingSheet(true);
+
+    try {
+      const result = await onSyncGoogleSheet(url);
+
+      if (!result.savedToHost) {
+        onToast({
+          title: "Host storage unavailable",
+          description: "Run the app with npm run host to sync from Google Sheets.",
+          tone: "error",
+        });
+        return;
+      }
+
+      setSummary({
+        importedCount: result.importedCount,
+      });
+      onToast({
+        title: "Google Sheet synced",
+        description: `${result.importedCount} ${result.importedCount === 1 ? "guest is" : "guests are"} in the active roster.`,
+        tone: "success",
+      });
+    } catch (error) {
+      onToast({
+        title: "Google Sheet sync failed",
+        description: error instanceof Error ? error.message : "The public sheet could not be downloaded.",
+        tone: "error",
+      });
+    } finally {
+      setIsSyncingSheet(false);
     }
   }
 
@@ -129,6 +181,26 @@ export function ImportPanel({ onImport, onToast }: ImportPanelProps) {
               type="file"
             />
           </label>
+        </div>
+
+        <div className="mt-5 grid gap-3 border-t border-stone-200 pt-4">
+          <Field label="Google Sheets">
+            <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <TextInput
+                onChange={(event) => setGoogleSheetUrl(event.target.value)}
+                placeholder="https://docs.google.com/spreadsheets/..."
+                type="url"
+                value={googleSheetUrl}
+              />
+              <Button
+                disabled={isParsing || isSyncingSheet}
+                onClick={handleGoogleSheetSync}
+                type="button"
+              >
+                {isSyncingSheet ? "Syncing..." : "Sync"}
+              </Button>
+            </div>
+          </Field>
         </div>
 
         {summary ? (
