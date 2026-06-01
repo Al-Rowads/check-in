@@ -9,6 +9,7 @@ import {
 } from "../lib/guest";
 import {
   type GoogleSheetSyncStatus,
+  isUnauthorizedHostError,
   loadGoogleSheetSyncStatus,
   loadGuestsFromHost,
   saveGoogleSheetSyncUrl,
@@ -32,7 +33,12 @@ export type StorageMode = "checking" | "host" | "local";
 
 const hostRefreshIntervalMs = 5 * 60 * 1000;
 
-export function useGuests(authSession: AuthSession | null) {
+type UseGuestsOptions = {
+  onHostSessionExpired?: () => void;
+};
+
+export function useGuests(authSession: AuthSession | null, options: UseGuestsOptions = {}) {
+  const { onHostSessionExpired } = options;
   const [guests, setGuests] = useState<Guest[]>(() => loadGuestsFromStorage());
   const [storageMode, setStorageMode] = useState<StorageMode>("checking");
   const [googleSheetSync, setGoogleSheetSync] = useState<GoogleSheetSyncStatus | null>(null);
@@ -51,6 +57,20 @@ export function useGuests(authSession: AuthSession | null) {
     hostStorageAvailableRef.current = false;
     setStorageMode("local");
   }, []);
+
+  const handleHostStorageError = useCallback(
+    (error: unknown) => {
+      if (isUnauthorizedHostError(error)) {
+        hostStorageAvailableRef.current = false;
+        setStorageMode("local");
+        onHostSessionExpired?.();
+        return;
+      }
+
+      disableHostStorage();
+    },
+    [disableHostStorage, onHostSessionExpired],
+  );
 
   const storeGuestsLocally = useCallback((nextGuests: Guest[]) => {
     guestsRef.current = nextGuests;
@@ -72,12 +92,12 @@ export function useGuests(authSession: AuthSession | null) {
           hasUnsavedHostChangesRef.current = false;
         }
         return true;
-      } catch {
-        disableHostStorage();
+      } catch (error) {
+        handleHostStorageError(error);
         return false;
       }
     },
-    [disableHostStorage],
+    [handleHostStorageError],
   );
 
   const applyGuestChanges = useCallback(
@@ -112,7 +132,9 @@ export function useGuests(authSession: AuthSession | null) {
         hostStorageAvailableRef.current = true;
         setStorageMode("host");
 
-        void loadGoogleSheetSyncStatus(authToken).then(setGoogleSheetSync).catch(() => undefined);
+        void loadGoogleSheetSyncStatus(authToken)
+          .then(setGoogleSheetSync)
+          .catch(handleHostStorageError);
 
         if (hasUnsavedHostChangesRef.current) {
           const pendingRosterFile = pendingRosterFileRef.current;
@@ -130,22 +152,22 @@ export function useGuests(authSession: AuthSession | null) {
                 pendingRosterFileRef.current = null;
               }
             })
-            .catch(disableHostStorage);
+            .catch(handleHostStorageError);
           return;
         }
 
         storeGuestsLocally(hostGuests);
       })
-      .catch(() => {
+      .catch((error) => {
         if (isMounted) {
-          disableHostStorage();
+          handleHostStorageError(error);
         }
       });
 
     return () => {
       isMounted = false;
     };
-  }, [authSession?.token, disableHostStorage, persistGuestsToHost, storeGuestsLocally]);
+  }, [authSession?.token, handleHostStorageError, persistGuestsToHost, storeGuestsLocally]);
 
   useEffect(() => {
     if (storageMode !== "host") {
@@ -171,12 +193,12 @@ export function useGuests(authSession: AuthSession | null) {
             setGoogleSheetSync(sync);
           }
         })
-        .catch(disableHostStorage);
+        .catch(handleHostStorageError);
     };
     const interval = window.setInterval(refreshFromHost, hostRefreshIntervalMs);
 
     return () => window.clearInterval(interval);
-  }, [disableHostStorage, storageMode, storeGuestsLocally]);
+  }, [disableHostStorage, handleHostStorageError, storageMode, storeGuestsLocally]);
 
   const importGuests = useCallback(
     async (candidates: GuestImportCandidate[], rosterFile: File): Promise<ImportGuestsResult> => {
@@ -204,8 +226,8 @@ export function useGuests(authSession: AuthSession | null) {
             hasUnsavedHostChangesRef.current = false;
             pendingRosterFileRef.current = null;
           }
-        } catch {
-          disableHostStorage();
+        } catch (error) {
+          handleHostStorageError(error);
         }
       }
 
@@ -214,7 +236,7 @@ export function useGuests(authSession: AuthSession | null) {
         savedToHost,
       };
     },
-    [disableHostStorage, storeGuestsLocally],
+    [handleHostStorageError, storeGuestsLocally],
   );
 
   const syncGoogleSheetUrl = useCallback(
@@ -252,7 +274,7 @@ export function useGuests(authSession: AuthSession | null) {
           throw error;
         }
 
-        disableHostStorage();
+        handleHostStorageError(error);
 
         return {
           importedCount: guestsRef.current.length,
@@ -260,7 +282,7 @@ export function useGuests(authSession: AuthSession | null) {
         };
       }
     },
-    [disableHostStorage, storeGuestsLocally],
+    [handleHostStorageError, storeGuestsLocally],
   );
 
   const setCheckInState = useCallback((guestId: string, nextState: CheckInState) => {

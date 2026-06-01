@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AUTH_STORAGE_KEY, STATIC_USERS, type UserRole } from "../config/auth";
-import { loginToHost } from "../lib/hostStorage";
+import { HostRequestError, isUnauthorizedHostError, loginToHost } from "../lib/hostStorage";
 
 export type AuthSession = {
   username: string;
@@ -32,8 +32,8 @@ export function useAuth() {
       setSession(hostSession);
 
       return { ok: true };
-    } catch {
-      if (staticSession) {
+    } catch (error) {
+      if (staticSession && canUseStaticFallback(error)) {
         setSession(staticSession);
 
         return { ok: true };
@@ -75,6 +75,18 @@ function authenticateStaticUser(username: string, password: string): AuthSession
   };
 }
 
+function canUseStaticFallback(error: unknown): boolean {
+  if (isUnauthorizedHostError(error)) {
+    return false;
+  }
+
+  if (error instanceof HostRequestError) {
+    return error.statusCode === 404;
+  }
+
+  return true;
+}
+
 function loadAuthSession(): AuthSession | null {
   const storedSession = localStorage.getItem(AUTH_STORAGE_KEY);
 
@@ -83,10 +95,7 @@ function loadAuthSession(): AuthSession | null {
   }
 
   if (storedSession === "authenticated") {
-    return {
-      role: "admin",
-      username: "admin",
-    };
+    return null;
   }
 
   try {
@@ -101,18 +110,13 @@ function loadAuthSession(): AuthSession | null {
     if (
       typeof session.username === "string" &&
       (session.role === "admin" || session.role === "user") &&
-      (session.token === undefined || typeof session.token === "string")
+      typeof session.token === "string"
     ) {
-      const authSession: AuthSession = {
+      return {
         role: session.role,
+        token: session.token,
         username: session.username,
       };
-
-      if (session.token) {
-        authSession.token = session.token;
-      }
-
-      return authSession;
     }
   } catch {
     return null;

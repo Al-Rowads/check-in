@@ -4,6 +4,16 @@ import { parseStoredGuests } from "./storage";
 
 const configuredApiBaseUrl = import.meta.env.VITE_CHECKIN_API_URL ?? "";
 
+export class HostRequestError extends Error {
+  constructor(
+    public readonly statusCode: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "HostRequestError";
+  }
+}
+
 export type GoogleSheetSyncStatus = {
   enabled: boolean;
   intervalMs: number;
@@ -37,7 +47,7 @@ export async function loginToHost(
   });
 
   if (!response.ok) {
-    throw new Error(await readHostError(response, "Invalid username or password."));
+    throw await toHostRequestError(response, "Invalid username or password.");
   }
 
   const payload: unknown = await response.json();
@@ -56,7 +66,7 @@ export async function loadGuestsFromHost(authToken: string): Promise<Guest[]> {
   });
 
   if (!response.ok) {
-    throw new Error("Host guest storage is unavailable.");
+    throw await toHostRequestError(response, "Host guest storage is unavailable.");
   }
 
   const payload: unknown = await response.json();
@@ -79,7 +89,7 @@ export async function saveGuestsToHost(guests: Guest[], authToken: string): Prom
   });
 
   if (!response.ok) {
-    throw new Error("Guest changes could not be saved on the host.");
+    throw await toHostRequestError(response, "Guest changes could not be saved on the host.");
   }
 }
 
@@ -101,7 +111,7 @@ export async function saveUploadedRosterToHost(
   });
 
   if (!response.ok) {
-    throw new Error("Uploaded roster could not be saved on the host.");
+    throw await toHostRequestError(response, "Uploaded roster could not be saved on the host.");
   }
 }
 
@@ -114,7 +124,7 @@ export async function loadGoogleSheetSyncStatus(
   });
 
   if (!response.ok) {
-    throw new Error("Google Sheets sync status is unavailable.");
+    throw await toHostRequestError(response, "Google Sheets sync status is unavailable.");
   }
 
   const payload: unknown = await response.json();
@@ -140,7 +150,7 @@ export async function saveGoogleSheetSyncUrl(
   });
 
   if (!response.ok) {
-    throw new Error(await readHostError(response, "Google Sheets link could not be synced."));
+    throw await toHostRequestError(response, "Google Sheets link could not be synced.");
   }
 
   const payload: unknown = await response.json();
@@ -186,6 +196,10 @@ export function resolveApiBaseUrl(
   } catch {
     return trimmedUrl;
   }
+}
+
+export function isUnauthorizedHostError(error: unknown): boolean {
+  return error instanceof HostRequestError && error.statusCode === 401;
 }
 
 function getCurrentOrigin(): string {
@@ -257,4 +271,11 @@ async function readHostError(response: Response, fallbackMessage: string): Promi
   }
 
   return fallbackMessage;
+}
+
+async function toHostRequestError(
+  response: Response,
+  fallbackMessage: string,
+): Promise<HostRequestError> {
+  return new HostRequestError(response.status, await readHostError(response, fallbackMessage));
 }

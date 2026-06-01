@@ -117,7 +117,7 @@ export function ImportPanel({ onImport, onSyncGoogleSheet, onToast }: ImportPane
       if (!result.savedToHost) {
         onToast({
           title: "Host storage unavailable",
-          description: "Run the app with npm run host to sync from Google Sheets.",
+          description: "Log out and log back in through the Docker-hosted app to sync from Google Sheets.",
           tone: "error",
         });
         return;

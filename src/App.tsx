@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { CheckInState } from "./types/guest";
 import { useAuth } from "./hooks/useAuth";
 import { useGuests } from "./hooks/useGuests";
@@ -12,7 +12,16 @@ import { LoginScreen } from "./components/LoginScreen";
 import { ToastViewport } from "./components/ToastViewport";
 
 export function App() {
+  const { toasts, addToast, dismissToast } = useToasts();
   const { isAuthenticated, login, logout, session } = useAuth();
+  const handleHostSessionExpired = useCallback(() => {
+    logout();
+    addToast({
+      title: "Log in again",
+      description: "The host session expired after the server restarted.",
+      tone: "warning",
+    });
+  }, [addToast, logout]);
   const {
     guests,
     stats,
@@ -21,8 +30,7 @@ export function App() {
     setCheckInState,
     syncGoogleSheetUrl,
     storageMode,
-  } = useGuests(session);
-  const { toasts, addToast, dismissToast } = useToasts();
+  } = useGuests(session, { onHostSessionExpired: handleHostSessionExpired });
   const searchInputRef = useRef<HTMLInputElement>(null);
   const isAdmin = session?.role === "admin";
 
