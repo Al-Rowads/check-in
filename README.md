@@ -47,6 +47,16 @@ The app is available at `http://localhost:4173`. Container data is stored in
 `/app/data`; the Compose file maps that to `./data` on the host so roster files,
 Google Sheets sync state, and check-in changes survive restarts.
 
+The container starts as root only long enough to make `/app/data` writable for
+the Node runtime user, then runs the app as `node`. If the host filesystem does
+not allow Docker to change bind-mount ownership, fix the host directory before
+starting the app:
+
+```bash
+mkdir -p data
+sudo chown -R 1000:1000 data
+```
+
 Runtime settings can be passed as environment variables:
 
 ```bash

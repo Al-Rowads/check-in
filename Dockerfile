@@ -19,12 +19,15 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-RUN mkdir -p /app/data && chown -R node:node /app
+RUN apk add --no-cache su-exec \
+    && mkdir -p /app/data \
+    && chown -R node:node /app
 
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/server.mjs ./server.mjs
+COPY --chown=root:root docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-USER node
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 4173
 VOLUME ["/app/data"]
@@ -32,4 +35,5 @@ VOLUME ["/app/data"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:' + (process.env.PORT || 4173) + '/api/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "server.mjs"]
