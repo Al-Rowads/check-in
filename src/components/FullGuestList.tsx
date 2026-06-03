@@ -44,21 +44,35 @@ export function FullGuestList({ guests, onMarkPaid, onStateChange }: FullGuestLi
       </div>
 
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {filterOptions.map((option) => (
-          <button
-            className={cn(
-              "min-h-10 shrink-0 rounded-full border px-4 text-sm font-bold transition",
-              filter === option.value
-                ? "border-teal-700 bg-teal-700 text-white"
-                : "border-stone-300 bg-white text-stone-700 hover:border-stone-400 hover:bg-stone-50",
-            )}
-            key={option.value}
-            onClick={() => setFilter(option.value)}
-            type="button"
-          >
-            {option.label}
-          </button>
-        ))}
+        {filterOptions.map((option) => {
+          const isSelected = filter === option.value;
+          const isIncompletePayment = option.value === "not_fully_paid";
+
+          return (
+            <button
+              className={cn(
+                "min-h-10 shrink-0 rounded-full border px-4 text-sm font-bold transition",
+                isSelected && isIncompletePayment
+                  ? "border-rose-600 bg-rose-600 text-white"
+                  : false,
+                isSelected && !isIncompletePayment
+                  ? "border-teal-700 bg-teal-700 text-white"
+                  : false,
+                !isSelected && isIncompletePayment
+                  ? "border-rose-200 bg-rose-50 text-rose-800 hover:border-rose-300 hover:bg-rose-100"
+                  : false,
+                !isSelected && !isIncompletePayment
+                  ? "border-stone-300 bg-white text-stone-700 hover:border-stone-400 hover:bg-stone-50"
+                  : false,
+              )}
+              key={option.value}
+              onClick={() => setFilter(option.value)}
+              type="button"
+            >
+              {option.label}
+            </button>
+          );
+        })}
       </div>
 
       <GuestList

@@ -40,7 +40,7 @@ export function StatusBadge({ status }: { status: GuestStatus }) {
 
 export function PaymentBadge({ payment }: { payment: PaymentStatus }) {
   return (
-    <Badge tone={payment === "full" ? "success" : "warning"}>
+    <Badge tone={payment === "full" ? "success" : "danger"}>
       {payment === "full" ? "Paid in full" : "Not fully paid"}
     </Badge>
   );
