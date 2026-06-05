@@ -6,6 +6,7 @@ import { GuestList } from "./GuestList";
 
 type FullGuestListProps = {
   guests: Guest[];
+  isCheckInActionPending: (guestId: string, nextState: CheckInState) => boolean;
   onStateChange: (guestId: string, nextState: CheckInState) => void;
   onMarkPaid: (guestId: string) => void;
 };
@@ -20,7 +21,12 @@ const filterOptions: Array<{ value: GuestFilter; label: string }> = [
   { value: "not_fully_paid", label: "Not fully paid" },
 ];
 
-export function FullGuestList({ guests, onMarkPaid, onStateChange }: FullGuestListProps) {
+export function FullGuestList({
+  guests,
+  isCheckInActionPending,
+  onMarkPaid,
+  onStateChange,
+}: FullGuestListProps) {
   const [filter, setFilter] = useState<GuestFilter>("all");
   const filteredGuests = useMemo(
     () => sortGuestsForDesk(applyGuestFilter(guests, filter)),
@@ -79,6 +85,7 @@ export function FullGuestList({ guests, onMarkPaid, onStateChange }: FullGuestLi
         emptyDescription="No guests are currently in this filter."
         emptyTitle="Nothing to show"
         guests={filteredGuests}
+        isCheckInActionPending={isCheckInActionPending}
         onMarkPaid={onMarkPaid}
         onStateChange={onStateChange}
       />

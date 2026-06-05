@@ -1,4 +1,4 @@
-import type { Guest } from "../types/guest";
+import type { CheckInState, Guest } from "../types/guest";
 import type { UserRole } from "../config/auth";
 import { parseStoredGuests } from "./storage";
 
@@ -107,6 +107,59 @@ export async function saveGuestsToHost(guests: Guest[], authToken: string): Prom
 
   if (!isRecord(payload)) {
     throw new Error("Host guest storage returned an invalid save response.");
+  }
+
+  return parseStoredGuests(payload.guests);
+}
+
+export async function saveGuestCheckInStateToHost(
+  guestId: string,
+  nextState: CheckInState,
+  authToken: string,
+): Promise<Guest[]> {
+  const response = await fetch(apiUrl(`/api/guests/${encodeURIComponent(guestId)}/check-in`), {
+    body: JSON.stringify({ nextState }),
+    headers: {
+      ...authHeaders(authToken),
+      "Content-Type": "application/json",
+    },
+    method: "PATCH",
+  });
+
+  if (!response.ok) {
+    throw await toHostRequestError(response, "Guest check-in state could not be saved on the host.");
+  }
+
+  const payload: unknown = await response.json();
+
+  if (!isRecord(payload)) {
+    throw new Error("Host guest storage returned an invalid check-in response.");
+  }
+
+  return parseStoredGuests(payload.guests);
+}
+
+export async function saveGuestPaymentToHost(
+  guestId: string,
+  authToken: string,
+): Promise<Guest[]> {
+  const response = await fetch(apiUrl(`/api/guests/${encodeURIComponent(guestId)}/payment`), {
+    body: JSON.stringify({ payment: "full" }),
+    headers: {
+      ...authHeaders(authToken),
+      "Content-Type": "application/json",
+    },
+    method: "PATCH",
+  });
+
+  if (!response.ok) {
+    throw await toHostRequestError(response, "Guest payment could not be saved on the host.");
+  }
+
+  const payload: unknown = await response.json();
+
+  if (!isRecord(payload)) {
+    throw new Error("Host guest storage returned an invalid payment response.");
   }
 
   return parseStoredGuests(payload.guests);

@@ -7,6 +7,7 @@ type GuestListProps = {
   emptyTitle: string;
   emptyDescription: string;
   layout?: "table" | "compact";
+  isCheckInActionPending: (guestId: string, nextState: CheckInState) => boolean;
   onStateChange: (guestId: string, nextState: CheckInState) => void;
   onMarkPaid: (guestId: string) => void;
 };
@@ -16,6 +17,7 @@ export function GuestList({
   emptyTitle,
   emptyDescription,
   layout = "table",
+  isCheckInActionPending,
   onMarkPaid,
   onStateChange,
 }: GuestListProps) {
@@ -66,6 +68,7 @@ export function GuestList({
 
             <GuestActions
               guest={guest}
+              isMarkingEntered={isCheckInActionPending(guest.id, "entered")}
               onMarkPaid={onMarkPaid}
               onStateChange={onStateChange}
             />

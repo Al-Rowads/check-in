@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CheckInState } from "./types/guest";
 import { useAuth } from "./hooks/useAuth";
 import { useGuests } from "./hooks/useGuests";
@@ -32,7 +32,16 @@ export function App() {
     storageMode,
   } = useGuests(session, { onHostSessionExpired: handleHostSessionExpired });
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const [pendingCheckInActions, setPendingCheckInActions] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const isAdmin = session?.role === "admin";
+
+  const isCheckInActionPending = useCallback(
+    (guestId: string, nextState: CheckInState) =>
+      pendingCheckInActions.has(getCheckInActionKey(guestId, nextState)),
+    [pendingCheckInActions],
+  );
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -42,27 +51,43 @@ export function App() {
 
   async function handleStateChange(guestId: string, nextState: CheckInState) {
     const guest = guests.find((currentGuest) => currentGuest.id === guestId);
-    const saved = await setCheckInState(guestId, nextState);
-    searchInputRef.current?.focus();
 
     if (!guest) {
       return;
     }
 
-    if (!saved) {
-      addToast({
-        title: "Could not save",
-        description: "The backend API did not confirm the guest update.",
-        tone: "error",
-      });
-      return;
-    }
-
-    addToast({
-      title: getStateToastTitle(nextState),
-      description: guest.name,
-      tone: nextState === "left" ? "info" : nextState === "entered" ? "success" : "warning",
+    const actionKey = getCheckInActionKey(guestId, nextState);
+    setPendingCheckInActions((currentActions) => {
+      const nextActions = new Set(currentActions);
+      nextActions.add(actionKey);
+      return nextActions;
     });
+
+    try {
+      const saved = await setCheckInState(guestId, nextState);
+      searchInputRef.current?.focus();
+
+      if (!saved) {
+        addToast({
+          title: "Could not save",
+          description: "The backend API did not confirm the guest update.",
+          tone: "error",
+        });
+        return;
+      }
+
+      addToast({
+        title: getStateToastTitle(nextState),
+        description: guest.name,
+        tone: nextState === "left" ? "info" : nextState === "entered" ? "success" : "warning",
+      });
+    } finally {
+      setPendingCheckInActions((currentActions) => {
+        const nextActions = new Set(currentActions);
+        nextActions.delete(actionKey);
+        return nextActions;
+      });
+    }
   }
 
   async function handleMarkPaid(guestId: string) {
@@ -157,6 +182,7 @@ export function App() {
             <GuestSearch
               guests={guests}
               inputRef={searchInputRef}
+              isCheckInActionPending={isCheckInActionPending}
               onMarkPaid={handleMarkPaid}
               onStateChange={handleStateChange}
             />
@@ -164,6 +190,7 @@ export function App() {
 
           <FullGuestList
             guests={guests}
+            isCheckInActionPending={isCheckInActionPending}
             onMarkPaid={handleMarkPaid}
             onStateChange={handleStateChange}
           />
@@ -173,6 +200,10 @@ export function App() {
       <ToastViewport onDismiss={dismissToast} toasts={toasts} />
     </>
   );
+}
+
+function getCheckInActionKey(guestId: string, nextState: CheckInState): string {
+  return `${guestId}:${nextState}`;
 }
 
 function getStateToastTitle(state: CheckInState): string {

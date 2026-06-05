@@ -3,15 +3,15 @@ import type { CheckInState, Guest, GuestImportCandidate } from "../types/guest";
 import {
   createGuestId,
   getGuestStats,
-  markGuestPaymentFull,
   refreshGuestRoster,
-  updateGuestCheckInState,
 } from "../lib/guest";
 import {
   type GoogleSheetSyncStatus,
   isUnauthorizedHostError,
   loadGoogleSheetSyncStatus,
   loadGuestsFromHost,
+  saveGuestCheckInStateToHost,
+  saveGuestPaymentToHost,
   saveGoogleSheetSyncUrl,
   saveGuestsToHost,
   saveUploadedRosterToHost,
@@ -30,7 +30,7 @@ export type GoogleSheetSyncResult = {
 
 export type StorageMode = "checking" | "host" | "error";
 
-const hostRefreshIntervalMs = 5 * 60 * 1000;
+const hostRefreshIntervalMs = 5 * 1000;
 
 type UseGuestsOptions = {
   onHostSessionExpired?: () => void;
@@ -96,15 +96,6 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
       }
     },
     [handleHostStorageError, setHostGuests],
-  );
-
-  const applyGuestChanges = useCallback(
-    async (nextGuests: Guest[]) => {
-      const savedGuests = await persistGuestsToHost(nextGuests);
-
-      return savedGuests !== null;
-    },
-    [persistGuestsToHost],
   );
 
   useEffect(() => {
@@ -284,23 +275,59 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
   );
 
   const setCheckInState = useCallback(
-    async (guestId: string, nextState: CheckInState): Promise<boolean> =>
-      applyGuestChanges(
-        guestsRef.current.map((guest) =>
-          guest.id === guestId ? updateGuestCheckInState(guest, nextState) : guest,
-        ),
-      ),
-    [applyGuestChanges],
+    async (guestId: string, nextState: CheckInState): Promise<boolean> => {
+      const authToken = authTokenRef.current;
+
+      if (!hostStorageAvailableRef.current || !authToken) {
+        return false;
+      }
+
+      pendingHostSaveCountRef.current += 1;
+
+      try {
+        const savedGuests = await saveGuestCheckInStateToHost(guestId, nextState, authToken);
+
+        hostStorageAvailableRef.current = true;
+        setStorageMode("host");
+        setHostGuests(savedGuests);
+
+        return true;
+      } catch (error) {
+        handleHostStorageError(error);
+        return false;
+      } finally {
+        pendingHostSaveCountRef.current = Math.max(0, pendingHostSaveCountRef.current - 1);
+      }
+    },
+    [handleHostStorageError, setHostGuests],
   );
 
   const markGuestPaid = useCallback(
-    async (guestId: string): Promise<boolean> =>
-      applyGuestChanges(
-        guestsRef.current.map((guest) =>
-          guest.id === guestId ? markGuestPaymentFull(guest) : guest,
-        ),
-      ),
-    [applyGuestChanges],
+    async (guestId: string): Promise<boolean> => {
+      const authToken = authTokenRef.current;
+
+      if (!hostStorageAvailableRef.current || !authToken) {
+        return false;
+      }
+
+      pendingHostSaveCountRef.current += 1;
+
+      try {
+        const savedGuests = await saveGuestPaymentToHost(guestId, authToken);
+
+        hostStorageAvailableRef.current = true;
+        setStorageMode("host");
+        setHostGuests(savedGuests);
+
+        return true;
+      } catch (error) {
+        handleHostStorageError(error);
+        return false;
+      } finally {
+        pendingHostSaveCountRef.current = Math.max(0, pendingHostSaveCountRef.current - 1);
+      }
+    },
+    [handleHostStorageError, setHostGuests],
   );
 
   return {

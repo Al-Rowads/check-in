@@ -8,6 +8,7 @@ import { GuestList } from "./GuestList";
 type GuestSearchProps = {
   guests: Guest[];
   inputRef: RefObject<HTMLInputElement>;
+  isCheckInActionPending: (guestId: string, nextState: CheckInState) => boolean;
   onStateChange: (guestId: string, nextState: CheckInState) => void;
   onMarkPaid: (guestId: string) => void;
 };
@@ -15,6 +16,7 @@ type GuestSearchProps = {
 export function GuestSearch({
   guests,
   inputRef,
+  isCheckInActionPending,
   onMarkPaid,
   onStateChange,
 }: GuestSearchProps) {
@@ -77,6 +79,7 @@ export function GuestSearch({
         }
         emptyTitle={query.trim() ? "No matches" : "Ready for guest lookup"}
         guests={limitedMatches}
+        isCheckInActionPending={isCheckInActionPending}
         layout="compact"
         onMarkPaid={onMarkPaid}
         onStateChange={onStateChange}

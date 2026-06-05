@@ -77,6 +77,7 @@ const contentTypes = new Map([
 
 let googleSheetSyncTimer = null;
 let googleSheetSyncInFlight = false;
+let guestStateMutationQueue = Promise.resolve();
 const authSessions = new Map();
 
 class HttpError extends Error {
@@ -152,12 +153,27 @@ async function handleRequest(request, response) {
   }
 
   if (requestUrl.pathname === "/api/guests" && request.method === "PUT") {
-    const session = authenticateRequest(request, ["admin", "user"]);
+    authenticateRequest(request, ["admin"]);
     const body = await readJsonBody(request);
     const guests = validateGuestsPayload(body.guests);
+    const savedGuests = await saveAdminGuestState(guests);
 
+    sendJson(response, 200, { guests: savedGuests });
+    return;
+  }
+
+  const guestAction = matchGuestActionPath(requestUrl.pathname);
+
+  if (guestAction && request.method === "PATCH") {
+    authenticateRequest(request, ["admin", "user"]);
+    const body = await readJsonBody(request);
     const savedGuests =
-      session.role === "admin" ? await saveAdminGuestState(guests) : await saveUserGuestState(guests);
+      guestAction.action === "check-in"
+        ? await saveGuestCheckInState(
+            guestAction.guestId,
+            validateCheckInActionPayload(body),
+          )
+        : await saveGuestPayment(guestAction.guestId, validatePaymentActionPayload(body));
 
     sendJson(response, 200, { guests: savedGuests });
     return;
@@ -211,6 +227,27 @@ async function handleRequest(request, response) {
   await serveStaticFile(requestUrl.pathname, request.method, response);
 }
 
+function matchGuestActionPath(pathname) {
+  const match = pathname.match(/^\/api\/guests\/([^/]+)\/(check-in|payment)$/);
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    action: match[2],
+    guestId: decodePathSegment(match[1]),
+  };
+}
+
+function decodePathSegment(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    throw new HttpError(400, "Guest id is invalid.");
+  }
+}
+
 async function loadGuests() {
   try {
     const rawGuests = JSON.parse(await readFile(guestsPath, "utf8"));
@@ -226,24 +263,86 @@ async function loadGuests() {
 }
 
 async function saveAdminGuestState(guests) {
-  await saveGuestState(guests);
+  return withGuestStateMutation(async () => {
+    const currentGuests = await loadGuests();
+    const nextGuests = mergeServerGuestProgressIntoIncomingGuests(currentGuests, guests);
 
-  return guests;
+    await saveGuestState(nextGuests);
+
+    return nextGuests;
+  });
 }
 
-async function saveUserGuestState(guests) {
-  const currentGuests = await loadGuests();
-  const nextGuests = validateUserGuestChanges(currentGuests, guests);
+async function saveGuestCheckInState(guestId, nextState) {
+  return withGuestStateMutation(async () => {
+    const guests = await loadGuests();
+    const guestIndex = findGuestIndexById(guests, guestId);
+    const nextGuests = [...guests];
+    nextGuests[guestIndex] = applyServerGuestCheckInState(guests[guestIndex], nextState);
 
-  await saveGuestState(nextGuests);
+    await saveGuestState(nextGuests);
 
-  return nextGuests;
+    return nextGuests;
+  });
+}
+
+async function saveGuestPayment(guestId, payment) {
+  return withGuestStateMutation(async () => {
+    const guests = await loadGuests();
+    const guestIndex = findGuestIndexById(guests, guestId);
+    const nextGuests = [...guests];
+    nextGuests[guestIndex] = validateGuest({
+      ...guests[guestIndex],
+      payment,
+    });
+
+    await saveGuestState(nextGuests);
+
+    return nextGuests;
+  });
 }
 
 async function saveGuestState(guests) {
   await mkdir(dataDir, { recursive: true });
   await atomicWriteFile(guestsPath, `${JSON.stringify(guests, null, 2)}\n`);
   await atomicWriteFile(activeRosterCsvPath, buildRosterCsv(guests));
+}
+
+function withGuestStateMutation(operation) {
+  const queuedOperation = guestStateMutationQueue.then(operation, operation);
+
+  guestStateMutationQueue = queuedOperation.catch(() => undefined);
+
+  return queuedOperation;
+}
+
+function findGuestIndexById(guests, guestId) {
+  const guestIndex = guests.findIndex((guest) => guest.id === guestId);
+
+  if (guestIndex === -1) {
+    throw new HttpError(404, "Guest was not found.");
+  }
+
+  return guestIndex;
+}
+
+function applyServerGuestCheckInState(guest, nextState) {
+  if (nextState === "entered") {
+    const { leftAt: _leftAt, ...rest } = guest;
+
+    return validateGuest({
+      ...rest,
+      checkInState: "entered",
+      enteredAt: guest.enteredAt ?? new Date().toISOString(),
+    });
+  }
+
+  const { enteredAt: _enteredAt, leftAt: _leftAt, ...rest } = guest;
+
+  return validateGuest({
+    ...rest,
+    checkInState: "not_entered",
+  });
 }
 
 async function saveUploadedRoster(upload) {
@@ -350,8 +449,14 @@ async function syncGoogleSheetRoster(reason) {
       );
     }
 
-    const currentGuests = await loadGuests();
-    const guests = refreshServerGuestRoster(currentGuests, importResult.guests);
+    const guests = await withGuestStateMutation(async () => {
+      const currentGuests = await loadGuests();
+      const refreshedGuests = refreshServerGuestRoster(currentGuests, importResult.guests);
+
+      await saveGuestState(refreshedGuests);
+
+      return refreshedGuests;
+    });
     const nextSync = {
       ...sync,
       lastError: null,
@@ -361,7 +466,6 @@ async function syncGoogleSheetRoster(reason) {
       updatedAt: new Date().toISOString(),
     };
 
-    await saveGuestState(guests);
     await saveDownloadedGoogleSheetCsv(csvText);
     await saveGoogleSheetSync(nextSync);
 
@@ -584,6 +688,30 @@ function validateGuestsPayload(value) {
   return value.map(validateGuest);
 }
 
+function validateCheckInActionPayload(value) {
+  if (!value || typeof value !== "object") {
+    throw new HttpError(400, "Guest check-in action is required.");
+  }
+
+  requireOneOf(
+    value.nextState,
+    ["entered", "not_entered"],
+    "Guest check-in action is invalid.",
+  );
+
+  return value.nextState;
+}
+
+function validatePaymentActionPayload(value) {
+  if (!value || typeof value !== "object") {
+    throw new HttpError(400, "Guest payment action is required.");
+  }
+
+  requireOneOf(value.payment, ["full"], "Guest payment action is invalid.");
+
+  return value.payment;
+}
+
 function validateGuest(value) {
   if (!value || typeof value !== "object") {
     throw new HttpError(400, "Guest entries must be objects.");
@@ -628,62 +756,6 @@ function validateGuest(value) {
   }
 
   return validatedGuest;
-}
-
-function validateUserGuestChanges(currentGuests, nextGuests) {
-  if (currentGuests.length !== nextGuests.length) {
-    throw new HttpError(403, "Normal users cannot add or remove roster entries.");
-  }
-
-  const currentGuestsById = currentGuests.reduce((guestsById, guest) => {
-    guestsById.set(guest.id, guest);
-
-    return guestsById;
-  }, new Map());
-  const seenGuestIds = new Set();
-
-  return nextGuests.map((nextGuest) => {
-    if (seenGuestIds.has(nextGuest.id)) {
-      throw new HttpError(403, "Normal users cannot duplicate roster entries.");
-    }
-
-    seenGuestIds.add(nextGuest.id);
-
-    const currentGuest = currentGuestsById.get(nextGuest.id);
-
-    if (!currentGuest) {
-      throw new HttpError(403, "Normal users cannot add roster entries.");
-    }
-
-    validateUserEditableGuestChange(currentGuest, nextGuest);
-
-    return nextGuest;
-  });
-}
-
-function validateUserEditableGuestChange(currentGuest, nextGuest) {
-  const lockedFields = [
-    "id",
-    "name",
-    "phoneNumber",
-    "normalizedPhoneNumber",
-    "status",
-    "amountPaid",
-    "importedAt",
-  ];
-
-  lockedFields.forEach((field) => {
-    if (!Object.is(currentGuest[field], nextGuest[field])) {
-      throw new HttpError(403, "Normal users cannot change roster details.");
-    }
-  });
-
-  if (
-    currentGuest.payment !== nextGuest.payment &&
-    (currentGuest.payment !== "not fully paid" || nextGuest.payment !== "full")
-  ) {
-    throw new HttpError(403, "Normal users cannot reduce payment status.");
-  }
 }
 
 function validateUploadPayload(value) {
@@ -848,6 +920,61 @@ function refreshServerGuestRoster(currentGuests, candidates) {
 
     return validateGuest(refreshedGuest);
   });
+}
+
+function mergeServerGuestProgressIntoIncomingGuests(currentGuests, incomingGuests) {
+  const currentGuestsById = currentGuests.reduce((guestsById, guest) => {
+    guestsById.set(guest.id, guest);
+
+    return guestsById;
+  }, new Map());
+  const existingGuestsByKey = groupGuestsByIdentityKey(currentGuests);
+  const uniqueExistingGuestsByPhone = getUniqueGuestsByPhone(currentGuests);
+  const incomingPhoneCounts = countGuestsByPhone(incomingGuests);
+  const matchedGuestIds = new Set();
+
+  return incomingGuests.map((incomingGuest) => {
+    const idMatchedGuest = currentGuestsById.get(incomingGuest.id);
+    const matchedGuest =
+      idMatchedGuest && !matchedGuestIds.has(idMatchedGuest.id)
+        ? idMatchedGuest
+        : takeMatchingGuest(
+            incomingGuest,
+            existingGuestsByKey,
+            uniqueExistingGuestsByPhone,
+            incomingPhoneCounts,
+            matchedGuestIds,
+          );
+
+    if (!matchedGuest) {
+      return validateGuest(incomingGuest);
+    }
+
+    matchedGuestIds.add(matchedGuest.id);
+    return mergeServerGuestProgress(incomingGuest, matchedGuest);
+  });
+}
+
+function mergeServerGuestProgress(incomingGuest, currentGuest) {
+  const { enteredAt: _incomingEnteredAt, leftAt: _incomingLeftAt, ...incomingWithoutTimestamps } =
+    incomingGuest;
+  const mergedGuest = {
+    ...incomingWithoutTimestamps,
+    checkInState: currentGuest.checkInState,
+    payment: currentGuest.payment === "full" ? "full" : incomingGuest.payment,
+  };
+
+  if (currentGuest.checkInState !== "not_entered") {
+    mergedGuest.enteredAt =
+      currentGuest.enteredAt ?? incomingGuest.enteredAt ?? new Date().toISOString();
+  }
+
+  if (currentGuest.checkInState === "left") {
+    mergedGuest.leftAt =
+      currentGuest.leftAt ?? incomingGuest.leftAt ?? mergedGuest.enteredAt;
+  }
+
+  return validateGuest(mergedGuest);
 }
 
 function groupGuestsByIdentityKey(guests) {
@@ -1359,6 +1486,6 @@ function sendJson(response, statusCode, body) {
 
 function setCorsHeaders(response) {
   response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
-  response.setHeader("Access-Control-Allow-Methods", "DELETE, GET, PUT, POST, OPTIONS");
+  response.setHeader("Access-Control-Allow-Methods", "DELETE, GET, PATCH, PUT, POST, OPTIONS");
   response.setHeader("Access-Control-Allow-Origin", "*");
 }
