@@ -1285,7 +1285,10 @@ async function getStaticFilePath(staticPath) {
 async function atomicWriteFile(filePath, data) {
   await mkdir(path.dirname(filePath), { recursive: true });
 
-  const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  const temporaryPath = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`,
+  );
 
   await writeFile(temporaryPath, data);
   await rename(temporaryPath, filePath);
