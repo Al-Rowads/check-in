@@ -152,6 +152,16 @@ async function handleRequest(request, response) {
     return;
   }
 
+  if (requestUrl.pathname === "/api/guests/export/entered.csv" && request.method === "GET") {
+    authenticateRequest(request, ["admin"]);
+    sendCsv(
+      response,
+      "entered-guests.csv",
+      buildRosterCsv((await loadGuests()).filter((guest) => guest.checkInState === "entered")),
+    );
+    return;
+  }
+
   if (requestUrl.pathname === "/api/guests" && request.method === "PUT") {
     authenticateRequest(request, ["admin"]);
     const body = await readJsonBody(request);
@@ -1482,6 +1492,15 @@ function sendJson(response, statusCode, body) {
     "Content-Type": "application/json; charset=utf-8",
   });
   response.end(`${JSON.stringify(body)}\n`);
+}
+
+function sendCsv(response, fileName, csvText) {
+  response.writeHead(200, {
+    "Cache-Control": "no-store",
+    "Content-Disposition": `attachment; filename="${fileName}"`,
+    "Content-Type": "text/csv; charset=utf-8",
+  });
+  response.end(csvText);
 }
 
 function setCorsHeaders(response) {

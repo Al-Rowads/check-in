@@ -8,6 +8,7 @@ import {
 import {
   type GoogleSheetSyncStatus,
   isUnauthorizedHostError,
+  loadEnteredGuestsCsvFromHost,
   loadGoogleSheetSyncStatus,
   loadGuestsFromHost,
   saveGuestCheckInStateToHost,
@@ -274,6 +275,21 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
     [handleHostStorageError, setHostGuests],
   );
 
+  const exportEnteredGuestsCsv = useCallback(async (): Promise<Blob | null> => {
+    const authToken = authTokenRef.current;
+
+    if (!hostStorageAvailableRef.current || !authToken) {
+      return null;
+    }
+
+    try {
+      return await loadEnteredGuestsCsvFromHost(authToken);
+    } catch (error) {
+      handleHostStorageError(error);
+      return null;
+    }
+  }, [handleHostStorageError]);
+
   const setCheckInState = useCallback(
     async (guestId: string, nextState: CheckInState): Promise<boolean> => {
       const authToken = authTokenRef.current;
@@ -333,6 +349,7 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
   return {
     guests,
     stats,
+    exportEnteredGuestsCsv,
     importGuests,
     googleSheetSync,
     syncGoogleSheetUrl,

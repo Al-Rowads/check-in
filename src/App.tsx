@@ -25,6 +25,7 @@ export function App() {
   const {
     guests,
     stats,
+    exportEnteredGuestsCsv,
     importGuests,
     markGuestPaid,
     setCheckInState,
@@ -35,6 +36,7 @@ export function App() {
   const [pendingCheckInActions, setPendingCheckInActions] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  const [isExportingEnteredCsv, setIsExportingEnteredCsv] = useState(false);
   const isAdmin = session?.role === "admin";
 
   const isCheckInActionPending = useCallback(
@@ -115,6 +117,32 @@ export function App() {
     });
   }
 
+  async function handleExportEnteredCsv() {
+    setIsExportingEnteredCsv(true);
+
+    try {
+      const csvBlob = await exportEnteredGuestsCsv();
+
+      if (!csvBlob) {
+        addToast({
+          title: "Export failed",
+          description: "The backend API did not return the entered guests CSV.",
+          tone: "error",
+        });
+        return;
+      }
+
+      downloadBlob(csvBlob, `entered-guests-${getLocalDateStamp()}.csv`);
+      addToast({
+        title: "CSV exported",
+        description: "Entered guests were downloaded from the backend.",
+        tone: "success",
+      });
+    } finally {
+      setIsExportingEnteredCsv(false);
+    }
+  }
+
   function handleLogout() {
     logout();
     addToast({
@@ -185,6 +213,12 @@ export function App() {
               isCheckInActionPending={isCheckInActionPending}
               onMarkPaid={handleMarkPaid}
               onStateChange={handleStateChange}
+              {...(isAdmin
+                ? {
+                    isExportingEnteredCsv,
+                    onExportEnteredCsv: handleExportEnteredCsv,
+                  }
+                : {})}
             />
           </div>
 
@@ -204,6 +238,27 @@ export function App() {
 
 function getCheckInActionKey(guestId: string, nextState: CheckInState): string {
   return `${guestId}:${nextState}`;
+}
+
+function downloadBlob(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+
+  link.href = url;
+  link.download = fileName;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function getLocalDateStamp(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
 }
 
 function getStateToastTitle(state: CheckInState): string {

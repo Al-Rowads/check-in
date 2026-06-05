@@ -89,6 +89,19 @@ export async function loadGuestsFromHost(authToken: string): Promise<Guest[]> {
   return parseStoredGuests(payload.guests);
 }
 
+export async function loadEnteredGuestsCsvFromHost(authToken: string): Promise<Blob> {
+  const response = await fetch(apiUrl("/api/guests/export/entered.csv"), {
+    cache: "no-store",
+    headers: authHeaders(authToken),
+  });
+
+  if (!response.ok) {
+    throw await toHostRequestError(response, "Entered guests CSV could not be exported.");
+  }
+
+  return response.blob();
+}
+
 export async function saveGuestsToHost(guests: Guest[], authToken: string): Promise<Guest[]> {
   const response = await fetch(apiUrl("/api/guests"), {
     body: JSON.stringify({ guests }),

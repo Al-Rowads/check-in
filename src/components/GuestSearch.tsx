@@ -2,6 +2,7 @@ import { KeyboardEvent, RefObject, useMemo, useState } from "react";
 import type { CheckInState, Guest } from "../types/guest";
 import { sortGuestsForDesk } from "../lib/guest";
 import { searchGuests } from "../lib/search";
+import { Button } from "./Button";
 import { Field, TextInput } from "./Field";
 import { GuestList } from "./GuestList";
 
@@ -9,6 +10,8 @@ type GuestSearchProps = {
   guests: Guest[];
   inputRef: RefObject<HTMLInputElement>;
   isCheckInActionPending: (guestId: string, nextState: CheckInState) => boolean;
+  isExportingEnteredCsv?: boolean;
+  onExportEnteredCsv?: () => void;
   onStateChange: (guestId: string, nextState: CheckInState) => void;
   onMarkPaid: (guestId: string) => void;
 };
@@ -17,6 +20,8 @@ export function GuestSearch({
   guests,
   inputRef,
   isCheckInActionPending,
+  isExportingEnteredCsv = false,
+  onExportEnteredCsv,
   onMarkPaid,
   onStateChange,
 }: GuestSearchProps) {
@@ -53,7 +58,23 @@ export function GuestSearch({
             Guest search
           </h2>
         </div>
-        {query.trim() ? (
+        {onExportEnteredCsv ? (
+          <div className="flex flex-wrap items-center gap-3">
+            {query.trim() ? (
+              <p className="text-sm font-semibold text-stone-600">
+                {matches.length} {matches.length === 1 ? "match" : "matches"}
+              </p>
+            ) : null}
+            <Button
+              disabled={isExportingEnteredCsv}
+              onClick={onExportEnteredCsv}
+              size="sm"
+              variant="secondary"
+            >
+              {isExportingEnteredCsv ? "Exporting..." : "Export entered CSV"}
+            </Button>
+          </div>
+        ) : query.trim() ? (
           <p className="text-sm font-semibold text-stone-600">
             {matches.length} {matches.length === 1 ? "match" : "matches"}
           </p>

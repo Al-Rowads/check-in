@@ -221,6 +221,50 @@ describe("server guest state actions", () => {
     });
     expect(guest.enteredAt).toEqual(expect.any(String));
   });
+
+  it("exports only entered guests as CSV for admins", async () => {
+    const server = await setupServer();
+    const adminToken = await login(server, "admin", "checkin2026");
+
+    await putGuests(server, adminToken, [
+      {
+        ...makeGuest("guest-1", "Ava Stone"),
+        checkInState: "entered",
+        enteredAt: "2026-06-05T10:00:00.000Z",
+      },
+      makeGuest("guest-2", "Mia Reed"),
+      {
+        ...makeGuest("guest-3", "Noah Vale"),
+        checkInState: "left",
+        enteredAt: "2026-06-05T09:00:00.000Z",
+        leftAt: "2026-06-05T11:00:00.000Z",
+      },
+    ]);
+
+    const response = await textRequest(server, "/api/guests/export/entered.csv", {
+      authToken: adminToken,
+      method: "GET",
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/csv");
+    expect(response.text).toContain("name,phone,value,status,payment,checkInState,enteredAt,leftAt,importedAt");
+    expect(response.text).toContain("Ava Stone");
+    expect(response.text).toContain("entered");
+    expect(response.text).not.toContain("Mia Reed");
+    expect(response.text).not.toContain("Noah Vale");
+  });
+
+  it("blocks normal users from exporting entered guests CSV", async () => {
+    const server = await setupServer();
+    const userToken = await login(server, "user", "user2026");
+    const response = await textRequest(server, "/api/guests/export/entered.csv", {
+      authToken: userToken,
+      method: "GET",
+    });
+
+    expect(response.status).toBe(403);
+  });
 });
 
 async function setupServer(): Promise<TestServer> {
@@ -413,6 +457,32 @@ async function apiRequest<T>(
   return {
     payload,
     status: response.status,
+  };
+}
+
+async function textRequest(
+  server: TestServer,
+  pathname: string,
+  options: {
+    authToken?: string;
+    method: "GET";
+  },
+): Promise<{ headers: Headers; status: number; text: string }> {
+  const headers: Record<string, string> = {};
+
+  if (options.authToken) {
+    headers.Authorization = `Bearer ${options.authToken}`;
+  }
+
+  const response = await fetch(`${server.baseUrl}${pathname}`, {
+    headers,
+    method: options.method,
+  });
+
+  return {
+    headers: response.headers,
+    status: response.status,
+    text: await response.text(),
   };
 }
 
