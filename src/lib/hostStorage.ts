@@ -3,6 +3,11 @@ import type { UserRole } from "../config/auth";
 import { parseStoredGuests } from "./storage";
 
 const configuredApiBaseUrl = import.meta.env.VITE_CHECKIN_API_URL ?? "";
+const configuredApiRequestTimeoutMs = Number(import.meta.env.VITE_CHECKIN_API_TIMEOUT_MS);
+const defaultApiRequestTimeoutMs =
+  Number.isFinite(configuredApiRequestTimeoutMs) && configuredApiRequestTimeoutMs > 0
+    ? configuredApiRequestTimeoutMs
+    : 12000;
 
 export class HostRequestError extends Error {
   constructor(
@@ -11,6 +16,13 @@ export class HostRequestError extends Error {
   ) {
     super(message);
     this.name = "HostRequestError";
+  }
+}
+
+export class HostRequestTimeoutError extends Error {
+  constructor(public readonly timeoutMs: number) {
+    super("Backend API request timed out. Check your connection and try again.");
+    this.name = "HostRequestTimeoutError";
   }
 }
 
@@ -38,7 +50,7 @@ export async function loginToHost(
   username: string,
   password: string,
 ): Promise<HostAuthSession> {
-  const response = await fetch(apiUrl("/api/session"), {
+  const response = await fetchWithTimeout(apiUrl("/api/session"), {
     body: JSON.stringify({ password, username }),
     headers: {
       "Content-Type": "application/json",
@@ -60,7 +72,7 @@ export async function loginToHost(
 }
 
 export async function logoutFromHost(authToken: string): Promise<void> {
-  const response = await fetch(apiUrl("/api/session"), {
+  const response = await fetchWithTimeout(apiUrl("/api/session"), {
     headers: authHeaders(authToken),
     method: "DELETE",
   });
@@ -71,7 +83,7 @@ export async function logoutFromHost(authToken: string): Promise<void> {
 }
 
 export async function loadGuestsFromHost(authToken: string): Promise<Guest[]> {
-  const response = await fetch(apiUrl("/api/guests"), {
+  const response = await fetchWithTimeout(apiUrl("/api/guests"), {
     cache: "no-store",
     headers: authHeaders(authToken),
   });
@@ -90,7 +102,7 @@ export async function loadGuestsFromHost(authToken: string): Promise<Guest[]> {
 }
 
 export async function loadEnteredGuestsCsvFromHost(authToken: string): Promise<Blob> {
-  const response = await fetch(apiUrl("/api/guests/export/entered.csv"), {
+  const response = await fetchWithTimeout(apiUrl("/api/guests/export/entered.csv"), {
     cache: "no-store",
     headers: authHeaders(authToken),
   });
@@ -103,7 +115,7 @@ export async function loadEnteredGuestsCsvFromHost(authToken: string): Promise<B
 }
 
 export async function saveGuestsToHost(guests: Guest[], authToken: string): Promise<Guest[]> {
-  const response = await fetch(apiUrl("/api/guests"), {
+  const response = await fetchWithTimeout(apiUrl("/api/guests"), {
     body: JSON.stringify({ guests }),
     headers: {
       ...authHeaders(authToken),
@@ -130,14 +142,17 @@ export async function saveGuestCheckInStateToHost(
   nextState: CheckInState,
   authToken: string,
 ): Promise<Guest[]> {
-  const response = await fetch(apiUrl(`/api/guests/${encodeURIComponent(guestId)}/check-in`), {
-    body: JSON.stringify({ nextState }),
-    headers: {
-      ...authHeaders(authToken),
-      "Content-Type": "application/json",
+  const response = await fetchWithTimeout(
+    apiUrl(`/api/guests/${encodeURIComponent(guestId)}/check-in`),
+    {
+      body: JSON.stringify({ nextState }),
+      headers: {
+        ...authHeaders(authToken),
+        "Content-Type": "application/json",
+      },
+      method: "PATCH",
     },
-    method: "PATCH",
-  });
+  );
 
   if (!response.ok) {
     throw await toHostRequestError(response, "Guest check-in state could not be saved on the host.");
@@ -156,14 +171,17 @@ export async function saveGuestPaymentToHost(
   guestId: string,
   authToken: string,
 ): Promise<Guest[]> {
-  const response = await fetch(apiUrl(`/api/guests/${encodeURIComponent(guestId)}/payment`), {
-    body: JSON.stringify({ payment: "full" }),
-    headers: {
-      ...authHeaders(authToken),
-      "Content-Type": "application/json",
+  const response = await fetchWithTimeout(
+    apiUrl(`/api/guests/${encodeURIComponent(guestId)}/payment`),
+    {
+      body: JSON.stringify({ payment: "full" }),
+      headers: {
+        ...authHeaders(authToken),
+        "Content-Type": "application/json",
+      },
+      method: "PATCH",
     },
-    method: "PATCH",
-  });
+  );
 
   if (!response.ok) {
     throw await toHostRequestError(response, "Guest payment could not be saved on the host.");
@@ -182,7 +200,7 @@ export async function saveUploadedRosterToHost(
   file: File,
   authToken: string,
 ): Promise<void> {
-  const response = await fetch(apiUrl("/api/roster-upload"), {
+  const response = await fetchWithTimeout(apiUrl("/api/roster-upload"), {
     body: JSON.stringify({
       contentBase64: await fileToBase64(file),
       contentType: file.type,
@@ -203,7 +221,7 @@ export async function saveUploadedRosterToHost(
 export async function loadGoogleSheetSyncStatus(
   authToken: string,
 ): Promise<GoogleSheetSyncStatus> {
-  const response = await fetch(apiUrl("/api/google-sheet-sync"), {
+  const response = await fetchWithTimeout(apiUrl("/api/google-sheet-sync"), {
     cache: "no-store",
     headers: authHeaders(authToken),
   });
@@ -225,7 +243,7 @@ export async function saveGoogleSheetSyncUrl(
   url: string,
   authToken: string,
 ): Promise<GoogleSheetSyncResponse> {
-  const response = await fetch(apiUrl("/api/google-sheet-sync"), {
+  const response = await fetchWithTimeout(apiUrl("/api/google-sheet-sync"), {
     body: JSON.stringify({ url }),
     headers: {
       ...authHeaders(authToken),
@@ -285,6 +303,48 @@ export function resolveApiBaseUrl(
 
 export function isUnauthorizedHostError(error: unknown): boolean {
   return error instanceof HostRequestError && error.statusCode === 401;
+}
+
+export async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = defaultApiRequestTimeoutMs,
+): Promise<Response> {
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return fetch(input, init);
+  }
+
+  const abortController = new AbortController();
+  const upstreamSignal = init.signal;
+  let didTimeout = false;
+
+  if (upstreamSignal?.aborted) {
+    abortController.abort();
+  } else if (upstreamSignal) {
+    upstreamSignal.addEventListener("abort", () => abortController.abort(), {
+      once: true,
+    });
+  }
+
+  const timeoutId = setTimeout(() => {
+    didTimeout = true;
+    abortController.abort();
+  }, timeoutMs);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: abortController.signal,
+    });
+  } catch (error) {
+    if (didTimeout) {
+      throw new HostRequestTimeoutError(timeoutMs);
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function getCurrentOrigin(): string {

@@ -6,6 +6,7 @@ import {
   refreshGuestRoster,
 } from "../lib/guest";
 import {
+  HostRequestError,
   type GoogleSheetSyncStatus,
   isUnauthorizedHostError,
   loadEnteredGuestsCsvFromHost,
@@ -17,6 +18,16 @@ import {
   saveGuestsToHost,
   saveUploadedRosterToHost,
 } from "../lib/hostStorage";
+import {
+  applyPendingHostActionToGuests,
+  applyPendingHostActionsToGuests,
+  createPendingCheckInAction,
+  createPendingPaymentAction,
+  parseStoredPendingHostActions,
+  removePendingHostAction,
+  type PendingCheckInState,
+  type PendingHostAction,
+} from "../lib/pendingHostActions";
 import type { AuthSession } from "./useAuth";
 
 export type ImportGuestsResult = {
@@ -31,7 +42,14 @@ export type GoogleSheetSyncResult = {
 
 export type StorageMode = "checking" | "host" | "error";
 
+export type GuestActionResult = {
+  applied: boolean;
+  queued: boolean;
+  savedToHost: boolean;
+};
+
 const hostRefreshIntervalMs = 5 * 1000;
+const pendingHostActionsStorageKey = "event-check-in:pending-host-actions";
 
 type UseGuestsOptions = {
   onHostSessionExpired?: () => void;
@@ -42,10 +60,15 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
   const [guests, setGuests] = useState<Guest[]>([]);
   const [storageMode, setStorageMode] = useState<StorageMode>("checking");
   const [googleSheetSync, setGoogleSheetSync] = useState<GoogleSheetSyncStatus | null>(null);
+  const [pendingHostActions, setPendingHostActions] = useState<PendingHostAction[]>(() =>
+    loadPendingHostActions(),
+  );
   const guestsRef = useRef<Guest[]>([]);
   const authTokenRef = useRef(authSession?.token ?? "");
   const hostStorageAvailableRef = useRef(false);
   const pendingHostSaveCountRef = useRef(0);
+  const pendingHostActionsRef = useRef<PendingHostAction[]>(pendingHostActions);
+  const isFlushingPendingHostActionsRef = useRef(false);
   const stats = useMemo(() => getGuestStats(guests), [guests]);
 
   useEffect(() => {
@@ -53,9 +76,33 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
   }, [authSession?.token]);
 
   const setHostGuests = useCallback((nextGuests: Guest[]) => {
-    guestsRef.current = nextGuests;
-    setGuests(nextGuests);
+    const guestsWithPendingActions = applyPendingHostActionsToGuests(
+      nextGuests,
+      pendingHostActionsRef.current,
+    );
+
+    guestsRef.current = guestsWithPendingActions;
+    setGuests(guestsWithPendingActions);
   }, []);
+
+  const setPendingHostActionsAndPersist = useCallback(
+    (
+      getNextActions:
+        | PendingHostAction[]
+        | ((currentActions: PendingHostAction[]) => PendingHostAction[]),
+    ) => {
+      const currentActions = pendingHostActionsRef.current;
+      const nextActions =
+        typeof getNextActions === "function"
+          ? getNextActions(currentActions)
+          : getNextActions;
+
+      pendingHostActionsRef.current = nextActions;
+      savePendingHostActions(nextActions);
+      setPendingHostActions(nextActions);
+    },
+    [],
+  );
 
   const handleHostStorageError = useCallback(
     (error: unknown) => {
@@ -71,36 +118,166 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
     [onHostSessionExpired, setHostGuests],
   );
 
-  const persistGuestsToHost = useCallback(
-    async (nextGuests: Guest[]): Promise<Guest[] | null> => {
-      const authToken = authTokenRef.current;
+  const loadGoogleSheetSyncStatusSafely = useCallback(
+    async (authToken: string) => {
+      try {
+        setGoogleSheetSync(await loadGoogleSheetSyncStatus(authToken));
+      } catch (error) {
+        if (isUnauthorizedHostError(error)) {
+          handleHostStorageError(error);
+        }
+      }
+    },
+    [handleHostStorageError],
+  );
 
-      if (!hostStorageAvailableRef.current || !authToken) {
-        return null;
+  const removePendingHostActionById = useCallback(
+    (actionId: string) => {
+      setPendingHostActionsAndPersist((currentActions) =>
+        removePendingHostAction(currentActions, actionId),
+      );
+    },
+    [setPendingHostActionsAndPersist],
+  );
+
+  const applyQueuedHostAction = useCallback(
+    (action: PendingHostAction): boolean => {
+      const nextGuests = applyPendingHostActionToGuests(guestsRef.current, action);
+
+      if (nextGuests === guestsRef.current) {
+        return false;
       }
 
+      guestsRef.current = nextGuests;
+      setGuests(nextGuests);
+      setPendingHostActionsAndPersist((currentActions) => [...currentActions, action]);
+
+      return true;
+    },
+    [setPendingHostActionsAndPersist],
+  );
+
+  const savePendingHostActionToHost = useCallback(
+    (action: PendingHostAction, authToken: string): Promise<Guest[]> => {
+      if (action.type === "payment") {
+        return saveGuestPaymentToHost(action.guestId, authToken);
+      }
+
+      return saveGuestCheckInStateToHost(action.guestId, action.nextState, authToken);
+    },
+    [],
+  );
+
+  const flushPendingHostActions = useCallback(
+    async (authToken: string): Promise<boolean> => {
+      if (isFlushingPendingHostActionsRef.current) {
+        return pendingHostActionsRef.current.length === 0;
+      }
+
+      isFlushingPendingHostActionsRef.current = true;
       pendingHostSaveCountRef.current += 1;
 
       try {
-        const savedGuests = await saveGuestsToHost(nextGuests, authToken);
+        while (pendingHostActionsRef.current.length > 0) {
+          if (authTokenRef.current !== authToken) {
+            return false;
+          }
+
+          const action = pendingHostActionsRef.current[0];
+
+          if (!action) {
+            break;
+          }
+
+          try {
+            const savedGuests = await savePendingHostActionToHost(action, authToken);
+
+            removePendingHostActionById(action.id);
+            hostStorageAvailableRef.current = true;
+            setStorageMode("host");
+            setHostGuests(savedGuests);
+          } catch (error) {
+            if (isUnauthorizedHostError(error)) {
+              handleHostStorageError(error);
+              return false;
+            }
+
+            if (isRejectedPendingHostAction(error)) {
+              removePendingHostActionById(action.id);
+              try {
+                setHostGuests(await loadGuestsFromHost(authToken));
+              } catch (reloadError) {
+                handleHostStorageError(reloadError);
+                return false;
+              }
+              continue;
+            }
+
+            handleHostStorageError(error);
+            return false;
+          }
+        }
 
         hostStorageAvailableRef.current = true;
         setStorageMode("host");
-        setHostGuests(savedGuests);
 
-        return savedGuests;
-      } catch (error) {
-        handleHostStorageError(error);
-        return null;
+        return true;
       } finally {
         pendingHostSaveCountRef.current = Math.max(0, pendingHostSaveCountRef.current - 1);
+        isFlushingPendingHostActionsRef.current = false;
       }
     },
-    [handleHostStorageError, setHostGuests],
+    [
+      handleHostStorageError,
+      removePendingHostActionById,
+      savePendingHostActionToHost,
+      setHostGuests,
+    ],
   );
 
+  const refreshHostState = useCallback(async () => {
+    if (pendingHostSaveCountRef.current > 0) {
+      return;
+    }
+
+    const authToken = authTokenRef.current;
+
+    if (!authToken) {
+      hostStorageAvailableRef.current = false;
+      setStorageMode("error");
+      setHostGuests([]);
+      setGoogleSheetSync(null);
+      return;
+    }
+
+    try {
+      const hostGuests = await loadGuestsFromHost(authToken);
+
+      if (authTokenRef.current !== authToken) {
+        return;
+      }
+
+      hostStorageAvailableRef.current = true;
+      setStorageMode("host");
+      setHostGuests(hostGuests);
+      await flushPendingHostActions(authToken);
+
+      if (authTokenRef.current !== authToken) {
+        return;
+      }
+
+      await loadGoogleSheetSyncStatusSafely(authToken);
+    } catch (error) {
+      handleHostStorageError(error);
+    }
+  }, [
+    flushPendingHostActions,
+    handleHostStorageError,
+    loadGoogleSheetSyncStatusSafely,
+    setHostGuests,
+  ]);
+
   useEffect(() => {
-    let isMounted = true;
     const authToken = authSession?.token;
 
     hostStorageAvailableRef.current = false;
@@ -110,79 +287,24 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
 
     if (!authToken) {
       setStorageMode("checking");
-      return () => {
-        isMounted = false;
-      };
+      return;
     }
 
     setStorageMode("checking");
-
-    loadGuestsFromHost(authToken)
-      .then((hostGuests) => {
-        if (!isMounted) {
-          return;
-        }
-
-        hostStorageAvailableRef.current = true;
-        setStorageMode("host");
-        setHostGuests(hostGuests);
-
-        void loadGoogleSheetSyncStatus(authToken)
-          .then((sync) => {
-            if (isMounted) {
-              setGoogleSheetSync(sync);
-            }
-          })
-          .catch((error) => {
-            if (isMounted) {
-              handleHostStorageError(error);
-            }
-          });
-      })
-      .catch((error) => {
-        if (isMounted) {
-          handleHostStorageError(error);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [authSession?.token, handleHostStorageError, setHostGuests]);
+    void refreshHostState();
+  }, [authSession?.token, refreshHostState, setHostGuests]);
 
   useEffect(() => {
-    if (storageMode !== "host") {
+    if (storageMode === "checking" || !authSession?.token) {
       return undefined;
     }
 
-    const refreshFromHost = () => {
-      if (pendingHostSaveCountRef.current > 0) {
-        return;
-      }
-
-      const authToken = authTokenRef.current;
-
-      if (!authToken) {
-        hostStorageAvailableRef.current = false;
-        setStorageMode("error");
-        setHostGuests([]);
-        setGoogleSheetSync(null);
-        return;
-      }
-
-      void Promise.all([loadGuestsFromHost(authToken), loadGoogleSheetSyncStatus(authToken)])
-        .then(([hostGuests, sync]) => {
-          if (pendingHostSaveCountRef.current === 0) {
-            setHostGuests(hostGuests);
-            setGoogleSheetSync(sync);
-          }
-        })
-        .catch(handleHostStorageError);
-    };
-    const interval = window.setInterval(refreshFromHost, hostRefreshIntervalMs);
+    const interval = window.setInterval(() => {
+      void refreshHostState();
+    }, hostRefreshIntervalMs);
 
     return () => window.clearInterval(interval);
-  }, [handleHostStorageError, storageMode, setHostGuests]);
+  }, [authSession?.token, refreshHostState, storageMode]);
 
   const importGuests = useCallback(
     async (candidates: GuestImportCandidate[], rosterFile: File): Promise<ImportGuestsResult> => {
@@ -291,59 +413,132 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
   }, [handleHostStorageError]);
 
   const setCheckInState = useCallback(
-    async (guestId: string, nextState: CheckInState): Promise<boolean> => {
+    async (guestId: string, nextState: CheckInState): Promise<GuestActionResult> => {
       const authToken = authTokenRef.current;
 
+      if (!isPendingCheckInState(nextState)) {
+        return {
+          applied: false,
+          queued: false,
+          savedToHost: false,
+        };
+      }
+
+      const action = createPendingCheckInAction(guestId, nextState);
+      const applied = applyQueuedHostAction(action);
+
+      if (!applied) {
+        return {
+          applied: false,
+          queued: false,
+          savedToHost: false,
+        };
+      }
+
       if (!hostStorageAvailableRef.current || !authToken) {
-        return false;
+        return {
+          applied: true,
+          queued: true,
+          savedToHost: false,
+        };
       }
 
       pendingHostSaveCountRef.current += 1;
 
       try {
-        const savedGuests = await saveGuestCheckInStateToHost(guestId, nextState, authToken);
+        const savedGuests = await savePendingHostActionToHost(action, authToken);
 
+        removePendingHostActionById(action.id);
         hostStorageAvailableRef.current = true;
         setStorageMode("host");
         setHostGuests(savedGuests);
 
-        return true;
+        return {
+          applied: true,
+          queued: pendingHostActionsRef.current.some(
+            (pendingAction) => pendingAction.id === action.id,
+          ),
+          savedToHost: true,
+        };
       } catch (error) {
         handleHostStorageError(error);
-        return false;
+
+        return {
+          applied: true,
+          queued: true,
+          savedToHost: false,
+        };
       } finally {
         pendingHostSaveCountRef.current = Math.max(0, pendingHostSaveCountRef.current - 1);
       }
     },
-    [handleHostStorageError, setHostGuests],
+    [
+      applyQueuedHostAction,
+      handleHostStorageError,
+      removePendingHostActionById,
+      savePendingHostActionToHost,
+      setHostGuests,
+    ],
   );
 
   const markGuestPaid = useCallback(
-    async (guestId: string): Promise<boolean> => {
+    async (guestId: string): Promise<GuestActionResult> => {
       const authToken = authTokenRef.current;
+      const action = createPendingPaymentAction(guestId);
+      const applied = applyQueuedHostAction(action);
+
+      if (!applied) {
+        return {
+          applied: false,
+          queued: false,
+          savedToHost: false,
+        };
+      }
 
       if (!hostStorageAvailableRef.current || !authToken) {
-        return false;
+        return {
+          applied: true,
+          queued: true,
+          savedToHost: false,
+        };
       }
 
       pendingHostSaveCountRef.current += 1;
 
       try {
-        const savedGuests = await saveGuestPaymentToHost(guestId, authToken);
+        const savedGuests = await savePendingHostActionToHost(action, authToken);
 
+        removePendingHostActionById(action.id);
         hostStorageAvailableRef.current = true;
         setStorageMode("host");
         setHostGuests(savedGuests);
 
-        return true;
+        return {
+          applied: true,
+          queued: pendingHostActionsRef.current.some(
+            (pendingAction) => pendingAction.id === action.id,
+          ),
+          savedToHost: true,
+        };
       } catch (error) {
         handleHostStorageError(error);
-        return false;
+
+        return {
+          applied: true,
+          queued: true,
+          savedToHost: false,
+        };
       } finally {
         pendingHostSaveCountRef.current = Math.max(0, pendingHostSaveCountRef.current - 1);
       }
     },
-    [handleHostStorageError, setHostGuests],
+    [
+      applyQueuedHostAction,
+      handleHostStorageError,
+      removePendingHostActionById,
+      savePendingHostActionToHost,
+      setHostGuests,
+    ],
   );
 
   return {
@@ -352,9 +547,57 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
     exportEnteredGuestsCsv,
     importGuests,
     googleSheetSync,
+    pendingHostActionCount: pendingHostActions.length,
     syncGoogleSheetUrl,
     storageMode,
     setCheckInState,
     markGuestPaid,
   };
+}
+
+function loadPendingHostActions(): PendingHostAction[] {
+  if (typeof localStorage === "undefined") {
+    return [];
+  }
+
+  try {
+    const storedActions = localStorage.getItem(pendingHostActionsStorageKey);
+
+    if (!storedActions) {
+      return [];
+    }
+
+    return parseStoredPendingHostActions(JSON.parse(storedActions));
+  } catch {
+    return [];
+  }
+}
+
+function savePendingHostActions(actions: PendingHostAction[]): void {
+  if (typeof localStorage === "undefined") {
+    return;
+  }
+
+  try {
+    if (actions.length === 0) {
+      localStorage.removeItem(pendingHostActionsStorageKey);
+      return;
+    }
+
+    localStorage.setItem(pendingHostActionsStorageKey, JSON.stringify(actions));
+  } catch {
+    // Keep the in-memory queue when browser storage is unavailable.
+  }
+}
+
+function isPendingCheckInState(state: CheckInState): state is PendingCheckInState {
+  return state === "entered" || state === "not_entered";
+}
+
+function isRejectedPendingHostAction(error: unknown): boolean {
+  return (
+    error instanceof HostRequestError &&
+    error.statusCode >= 400 &&
+    error.statusCode < 500
+  );
 }

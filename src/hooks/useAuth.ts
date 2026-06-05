@@ -1,6 +1,11 @@
 import { useCallback, useState } from "react";
 import type { UserRole } from "../config/auth";
-import { HostRequestError, loginToHost, logoutFromHost } from "../lib/hostStorage";
+import {
+  HostRequestError,
+  HostRequestTimeoutError,
+  loginToHost,
+  logoutFromHost,
+} from "../lib/hostStorage";
 
 const authStorageKey = "event-check-in:auth-session";
 
@@ -120,7 +125,7 @@ function isAuthSession(value: unknown): value is AuthSession {
 }
 
 function getLoginErrorMessage(error: unknown): string {
-  if (error instanceof HostRequestError) {
+  if (error instanceof HostRequestError || error instanceof HostRequestTimeoutError) {
     return error.message;
   }
 

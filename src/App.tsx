@@ -28,6 +28,7 @@ export function App() {
     exportEnteredGuestsCsv,
     importGuests,
     markGuestPaid,
+    pendingHostActionCount,
     setCheckInState,
     syncGoogleSheetUrl,
     storageMode,
@@ -66,14 +67,23 @@ export function App() {
     });
 
     try {
-      const saved = await setCheckInState(guestId, nextState);
+      const result = await setCheckInState(guestId, nextState);
       searchInputRef.current?.focus();
 
-      if (!saved) {
+      if (!result.applied) {
         addToast({
           title: "Could not save",
           description: "The backend API did not confirm the guest update.",
           tone: "error",
+        });
+        return;
+      }
+
+      if (!result.savedToHost) {
+        addToast({
+          title: "Marked locally",
+          description: `${guest.name} will sync when the backend is available.`,
+          tone: "warning",
         });
         return;
       }
@@ -94,18 +104,27 @@ export function App() {
 
   async function handleMarkPaid(guestId: string) {
     const guest = guests.find((currentGuest) => currentGuest.id === guestId);
-    const saved = await markGuestPaid(guestId);
+    const result = await markGuestPaid(guestId);
     searchInputRef.current?.focus();
 
     if (!guest) {
       return;
     }
 
-    if (!saved) {
+    if (!result.applied) {
       addToast({
         title: "Could not save",
         description: "The backend API did not confirm the payment update.",
         tone: "error",
+      });
+      return;
+    }
+
+    if (!result.savedToHost) {
+      addToast({
+        title: "Marked paid locally",
+        description: `${guest.name} will sync when the backend is available.`,
+        tone: "warning",
       });
       return;
     }
@@ -181,7 +200,7 @@ export function App() {
                 {guests.length} registered
               </div>
               <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-semibold text-stone-700">
-                {getStorageModeLabel(storageMode)}
+                {getStorageModeLabel(storageMode, pendingHostActionCount)}
               </div>
               <Button onClick={handleLogout} variant="secondary">
                 Log out
@@ -272,7 +291,14 @@ function getStateToastTitle(state: CheckInState): string {
   }
 }
 
-function getStorageModeLabel(storageMode: ReturnType<typeof useGuests>["storageMode"]): string {
+function getStorageModeLabel(
+  storageMode: ReturnType<typeof useGuests>["storageMode"],
+  pendingHostActionCount: number,
+): string {
+  if (pendingHostActionCount > 0) {
+    return `Sync pending (${pendingHostActionCount})`;
+  }
+
   switch (storageMode) {
     case "checking":
       return "Checking backend";
