@@ -810,22 +810,19 @@ function parseGoogleSheetGid(hash) {
 }
 
 function refreshServerGuestRoster(currentGuests, candidates) {
-  const existingGuestsByKey = currentGuests.reduce((guestsByKey, guest) => {
-    const key = getRosterIdentityKey(guest);
-    const existingGuests = guestsByKey.get(key);
-
-    if (existingGuests) {
-      existingGuests.push(guest);
-    } else {
-      guestsByKey.set(key, [guest]);
-    }
-
-    return guestsByKey;
-  }, new Map());
+  const existingGuestsByKey = groupGuestsByIdentityKey(currentGuests);
+  const uniqueExistingGuestsByPhone = getUniqueGuestsByPhone(currentGuests);
+  const candidatePhoneCounts = countGuestsByPhone(candidates);
+  const matchedGuestIds = new Set();
 
   return candidates.map((candidate) => {
-    const key = getRosterIdentityKey(candidate);
-    const matchedGuest = existingGuestsByKey.get(key)?.shift();
+    const matchedGuest = takeMatchingGuest(
+      candidate,
+      existingGuestsByKey,
+      uniqueExistingGuestsByPhone,
+      candidatePhoneCounts,
+      matchedGuestIds,
+    );
     const guest = {
       ...candidate,
       id: matchedGuest?.id ?? candidate.id ?? randomUUID(),
@@ -851,6 +848,89 @@ function refreshServerGuestRoster(currentGuests, candidates) {
 
     return validateGuest(refreshedGuest);
   });
+}
+
+function groupGuestsByIdentityKey(guests) {
+  return guests.reduce((guestsByKey, guest) => {
+    const key = getRosterIdentityKey(guest);
+    const existingGuests = guestsByKey.get(key);
+
+    if (existingGuests) {
+      existingGuests.push(guest);
+    } else {
+      guestsByKey.set(key, [guest]);
+    }
+
+    return guestsByKey;
+  }, new Map());
+}
+
+function getUniqueGuestsByPhone(guests) {
+  const guestsByPhone = guests.reduce((phoneGroups, guest) => {
+    const key = getRosterPhoneKey(guest);
+    const existingGuests = phoneGroups.get(key);
+
+    if (existingGuests) {
+      existingGuests.push(guest);
+    } else {
+      phoneGroups.set(key, [guest]);
+    }
+
+    return phoneGroups;
+  }, new Map());
+
+  return Array.from(guestsByPhone.entries()).reduce((uniqueGuests, [phoneKey, phoneGuests]) => {
+    if (phoneGuests.length === 1 && phoneGuests[0]) {
+      uniqueGuests.set(phoneKey, phoneGuests[0]);
+    }
+
+    return uniqueGuests;
+  }, new Map());
+}
+
+function countGuestsByPhone(guests) {
+  return guests.reduce((phoneCounts, guest) => {
+    const key = getRosterPhoneKey(guest);
+
+    phoneCounts.set(key, (phoneCounts.get(key) ?? 0) + 1);
+
+    return phoneCounts;
+  }, new Map());
+}
+
+function takeMatchingGuest(
+  candidate,
+  existingGuestsByKey,
+  uniqueExistingGuestsByPhone,
+  candidatePhoneCounts,
+  matchedGuestIds,
+) {
+  const key = getRosterIdentityKey(candidate);
+  const exactMatches = existingGuestsByKey.get(key);
+
+  while (exactMatches?.length) {
+    const matchedGuest = exactMatches.shift();
+
+    if (matchedGuest && !matchedGuestIds.has(matchedGuest.id)) {
+      matchedGuestIds.add(matchedGuest.id);
+      return matchedGuest;
+    }
+  }
+
+  const phoneKey = getRosterPhoneKey(candidate);
+
+  if (candidatePhoneCounts.get(phoneKey) !== 1) {
+    return undefined;
+  }
+
+  const phoneMatchedGuest = uniqueExistingGuestsByPhone.get(phoneKey);
+
+  if (!phoneMatchedGuest || matchedGuestIds.has(phoneMatchedGuest.id)) {
+    return undefined;
+  }
+
+  matchedGuestIds.add(phoneMatchedGuest.id);
+  return phoneMatchedGuest;
 }
 
 function parseRosterCsvText(csvText) {

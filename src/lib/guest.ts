@@ -123,22 +123,19 @@ export function refreshGuestRoster(
   currentGuests: Guest[],
   candidates: GuestImportCandidate[],
 ): Guest[] {
-  const existingGuestsByKey = currentGuests.reduce<Map<string, Guest[]>>((guestsByKey, guest) => {
-    const key = getRosterIdentityKey(guest);
-    const existingGuests = guestsByKey.get(key);
-
-    if (existingGuests) {
-      existingGuests.push(guest);
-    } else {
-      guestsByKey.set(key, [guest]);
-    }
-
-    return guestsByKey;
-  }, new Map());
+  const existingGuestsByKey = groupGuestsByIdentityKey(currentGuests);
+  const uniqueExistingGuestsByPhone = getUniqueGuestsByPhone(currentGuests);
+  const candidatePhoneCounts = countGuestsByPhone(candidates);
+  const matchedGuestIds = new Set<string>();
 
   return candidates.map<Guest>((candidate) => {
-    const key = getRosterIdentityKey(candidate);
-    const matchedGuest = existingGuestsByKey.get(key)?.shift();
+    const matchedGuest = takeMatchingGuest(
+      candidate,
+      existingGuestsByKey,
+      uniqueExistingGuestsByPhone,
+      candidatePhoneCounts,
+      matchedGuestIds,
+    );
     const guest: Guest = {
       ...candidate,
       id: matchedGuest?.id ?? candidate.id ?? createGuestId(candidate.normalizedPhoneNumber),
@@ -166,6 +163,185 @@ export function refreshGuestRoster(
   });
 }
 
+export function mergeLocalGuestProgressIntoHostGuests(
+  hostGuests: Guest[],
+  localGuests: Guest[],
+): Guest[] {
+  const localGuestsByKey = groupGuestsByIdentityKey(localGuests);
+  const uniqueLocalGuestsByPhone = getUniqueGuestsByPhone(localGuests);
+  const hostPhoneCounts = countGuestsByPhone(hostGuests);
+  const matchedLocalGuestIds = new Set<string>();
+
+  return hostGuests.map((hostGuest) => {
+    const localGuest = takeMatchingGuest(
+      hostGuest,
+      localGuestsByKey,
+      uniqueLocalGuestsByPhone,
+      hostPhoneCounts,
+      matchedLocalGuestIds,
+    );
+
+    return localGuest ? mergeGuestProgress(hostGuest, localGuest) : hostGuest;
+  });
+}
+
+function mergeGuestProgress(hostGuest: Guest, localGuest: Guest): Guest {
+  let nextGuest = hostGuest;
+
+  if (localGuest.payment === "full" && hostGuest.payment !== "full") {
+    nextGuest = {
+      ...nextGuest,
+      payment: "full",
+    };
+  }
+
+  if (checkInStateRank(localGuest.checkInState) > checkInStateRank(hostGuest.checkInState)) {
+    if (localGuest.checkInState === "entered") {
+      const { leftAt: _leftAt, ...rest } = nextGuest;
+
+      nextGuest = {
+        ...rest,
+        checkInState: "entered",
+        enteredAt: localGuest.enteredAt ?? hostGuest.enteredAt ?? new Date().toISOString(),
+      };
+    }
+
+    if (localGuest.checkInState === "left") {
+      nextGuest = {
+        ...nextGuest,
+        checkInState: "left",
+        enteredAt:
+          localGuest.enteredAt ??
+          hostGuest.enteredAt ??
+          localGuest.leftAt ??
+          new Date().toISOString(),
+        leftAt: localGuest.leftAt ?? hostGuest.leftAt ?? new Date().toISOString(),
+      };
+    }
+  }
+
+  if (
+    localGuest.checkInState === "entered" &&
+    nextGuest.checkInState === "entered" &&
+    localGuest.enteredAt &&
+    !nextGuest.enteredAt
+  ) {
+    nextGuest = {
+      ...nextGuest,
+      enteredAt: localGuest.enteredAt,
+    };
+  }
+
+  if (
+    localGuest.checkInState === "left" &&
+    nextGuest.checkInState === "left" &&
+    (localGuest.enteredAt || localGuest.leftAt) &&
+    (!nextGuest.enteredAt || !nextGuest.leftAt)
+  ) {
+    const mergedGuest = { ...nextGuest };
+
+    if (!mergedGuest.enteredAt && localGuest.enteredAt) {
+      mergedGuest.enteredAt = localGuest.enteredAt;
+    }
+
+    if (!mergedGuest.leftAt && localGuest.leftAt) {
+      mergedGuest.leftAt = localGuest.leftAt;
+    }
+
+    nextGuest = mergedGuest;
+  }
+
+  return nextGuest;
+}
+
+function groupGuestsByIdentityKey(guests: Guest[]): Map<string, Guest[]> {
+  return guests.reduce<Map<string, Guest[]>>((guestsByKey, guest) => {
+    const key = getRosterIdentityKey(guest);
+    const existingGuests = guestsByKey.get(key);
+
+    if (existingGuests) {
+      existingGuests.push(guest);
+    } else {
+      guestsByKey.set(key, [guest]);
+    }
+
+    return guestsByKey;
+  }, new Map());
+}
+
+function getUniqueGuestsByPhone(guests: Guest[]): Map<string, Guest> {
+  const guestsByPhone = guests.reduce<Map<string, Guest[]>>((phoneGroups, guest) => {
+    const key = getRosterPhoneKey(guest);
+    const existingGuests = phoneGroups.get(key);
+
+    if (existingGuests) {
+      existingGuests.push(guest);
+    } else {
+      phoneGroups.set(key, [guest]);
+    }
+
+    return phoneGroups;
+  }, new Map());
+
+  return Array.from(guestsByPhone.entries()).reduce<Map<string, Guest>>(
+    (uniqueGuests, [phoneKey, phoneGuests]) => {
+      if (phoneGuests.length === 1 && phoneGuests[0]) {
+        uniqueGuests.set(phoneKey, phoneGuests[0]);
+      }
+
+      return uniqueGuests;
+    },
+    new Map(),
+  );
+}
+
+function countGuestsByPhone(
+  guests: Array<Pick<Guest, "normalizedPhoneNumber">>,
+): Map<string, number> {
+  return guests.reduce<Map<string, number>>((phoneCounts, guest) => {
+    const key = getRosterPhoneKey(guest);
+
+    phoneCounts.set(key, (phoneCounts.get(key) ?? 0) + 1);
+
+    return phoneCounts;
+  }, new Map());
+}
+
+function takeMatchingGuest(
+  candidate: Pick<Guest, "name" | "normalizedPhoneNumber">,
+  existingGuestsByKey: Map<string, Guest[]>,
+  uniqueExistingGuestsByPhone: Map<string, Guest>,
+  candidatePhoneCounts: Map<string, number>,
+  matchedGuestIds: Set<string>,
+): Guest | undefined {
+  const key = getRosterIdentityKey(candidate);
+  const exactMatches = existingGuestsByKey.get(key);
+
+  while (exactMatches?.length) {
+    const matchedGuest = exactMatches.shift();
+
+    if (matchedGuest && !matchedGuestIds.has(matchedGuest.id)) {
+      matchedGuestIds.add(matchedGuest.id);
+      return matchedGuest;
+    }
+  }
+
+  const phoneKey = getRosterPhoneKey(candidate);
+
+  if (candidatePhoneCounts.get(phoneKey) !== 1) {
+    return undefined;
+  }
+
+  const phoneMatchedGuest = uniqueExistingGuestsByPhone.get(phoneKey);
+
+  if (!phoneMatchedGuest || matchedGuestIds.has(phoneMatchedGuest.id)) {
+    return undefined;
+  }
+
+  matchedGuestIds.add(phoneMatchedGuest.id);
+  return phoneMatchedGuest;
+}
+
 export function sortGuestsForDesk(guests: Guest[]): Guest[] {
   return [...guests].sort((first, second) => {
     const stateOrder = stateSortValue(first.checkInState) - stateSortValue(second.checkInState);
@@ -176,6 +352,17 @@ export function sortGuestsForDesk(guests: Guest[]): Guest[] {
 
     return first.name.localeCompare(second.name);
   });
+}
+
+function checkInStateRank(state: CheckInState): number {
+  switch (state) {
+    case "not_entered":
+      return 0;
+    case "entered":
+      return 1;
+    case "left":
+      return 2;
+  }
 }
 
 function stateSortValue(state: CheckInState): number {
@@ -193,6 +380,10 @@ function getRosterIdentityKey(
   guest: Pick<Guest, "name" | "normalizedPhoneNumber">,
 ): string {
   return JSON.stringify([guest.normalizedPhoneNumber, normalizeGuestName(guest.name)]);
+}
+
+function getRosterPhoneKey(guest: Pick<Guest, "normalizedPhoneNumber">): string {
+  return guest.normalizedPhoneNumber;
 }
 
 function normalizeGuestName(name: string): string {

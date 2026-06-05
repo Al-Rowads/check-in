@@ -4,6 +4,7 @@ import {
   createGuestId,
   getGuestStats,
   markGuestPaymentFull,
+  mergeLocalGuestProgressIntoHostGuests,
   refreshGuestRoster,
   updateGuestCheckInState,
 } from "../lib/guest";
@@ -109,6 +110,35 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
     [persistGuestsToHost, storeGuestsLocally],
   );
 
+  const pushLocalProgressToHost = useCallback(
+    async (hostGuests: Guest[], authToken: string): Promise<Guest[] | null> => {
+      const localGuests = guestsRef.current;
+      const mergedGuests = mergeLocalGuestProgressIntoHostGuests(hostGuests, localGuests);
+      const hasLocalProgress = mergedGuests.some((guest, index) => guest !== hostGuests[index]);
+
+      if (!hasLocalProgress) {
+        return hostGuests;
+      }
+
+      hasUnsavedHostChangesRef.current = true;
+
+      try {
+        await saveGuestsToHost(mergedGuests, authToken);
+
+        if (guestsRef.current === localGuests || guestsRef.current === mergedGuests) {
+          hasUnsavedHostChangesRef.current = false;
+          pendingRosterFileRef.current = null;
+        }
+
+        return mergedGuests;
+      } catch (error) {
+        handleHostStorageError(error);
+        return null;
+      }
+    },
+    [handleHostStorageError],
+  );
+
   useEffect(() => {
     let isMounted = true;
     const authToken = authSession?.token;
@@ -124,7 +154,7 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
     setStorageMode("checking");
 
     loadGuestsFromHost(authToken)
-      .then((hostGuests) => {
+      .then(async (hostGuests) => {
         if (!isMounted) {
           return;
         }
@@ -140,11 +170,19 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
           const pendingRosterFile = pendingRosterFileRef.current;
           const nextGuests = guestsRef.current;
 
+          if (!pendingRosterFile) {
+            const syncedGuests = await pushLocalProgressToHost(hostGuests, authToken);
+
+            if (isMounted && syncedGuests) {
+              storeGuestsLocally(syncedGuests);
+            }
+
+            return;
+          }
+
           void Promise.all([
             saveGuestsToHost(nextGuests, authToken),
-            pendingRosterFile
-              ? saveUploadedRosterToHost(pendingRosterFile, authToken)
-              : Promise.resolve(),
+            saveUploadedRosterToHost(pendingRosterFile, authToken),
           ])
             .then(() => {
               if (guestsRef.current === nextGuests) {
@@ -156,7 +194,11 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
           return;
         }
 
-        storeGuestsLocally(hostGuests);
+        const syncedGuests = await pushLocalProgressToHost(hostGuests, authToken);
+
+        if (isMounted && syncedGuests) {
+          storeGuestsLocally(syncedGuests);
+        }
       })
       .catch((error) => {
         if (isMounted) {
@@ -167,7 +209,13 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
     return () => {
       isMounted = false;
     };
-  }, [authSession?.token, handleHostStorageError, persistGuestsToHost, storeGuestsLocally]);
+  }, [
+    authSession?.token,
+    handleHostStorageError,
+    persistGuestsToHost,
+    pushLocalProgressToHost,
+    storeGuestsLocally,
+  ]);
 
   useEffect(() => {
     if (storageMode !== "host") {

@@ -3,6 +3,7 @@ import type { Guest, GuestImportCandidate } from "../types/guest";
 import {
   getGuestStats,
   markGuestPaymentFull,
+  mergeLocalGuestProgressIntoHostGuests,
   refreshGuestRoster,
   updateGuestCheckInState,
 } from "./guest";
@@ -82,6 +83,134 @@ describe("refreshGuestRoster", () => {
     const refreshedGuests = refreshGuestRoster(currentGuests, candidates);
 
     expect(refreshedGuests[0]?.payment).toBe("full");
+  });
+
+  it("preserves check-in state when a unique guest name changes in the roster", () => {
+    const enteredAt = "2026-06-01T10:00:00.000Z";
+    const currentGuests: Guest[] = [
+      {
+        ...makeGuest("existing-row", "not fully paid"),
+        checkInState: "entered",
+        enteredAt,
+      },
+    ];
+    const candidates: GuestImportCandidate[] = [
+      {
+        ...makeCandidate("imported-row", "not fully paid"),
+        name: "Ava S.",
+      },
+    ];
+
+    const refreshedGuests = refreshGuestRoster(currentGuests, candidates);
+
+    expect(refreshedGuests[0]).toMatchObject({
+      id: "existing-row",
+      name: "Ava S.",
+      checkInState: "entered",
+      enteredAt,
+    });
+  });
+
+  it("does not match by phone when duplicate phone numbers make the guest ambiguous", () => {
+    const currentGuests: Guest[] = [
+      {
+        ...makeGuest("first-existing-row", "not fully paid"),
+        checkInState: "entered",
+        enteredAt: "2026-06-01T10:00:00.000Z",
+      },
+      {
+        ...makeGuest("second-existing-row", "not fully paid"),
+        name: "Avery Stone",
+      },
+    ];
+    const candidates: GuestImportCandidate[] = [
+      {
+        ...makeCandidate("imported-row", "not fully paid"),
+        name: "Ava S.",
+      },
+    ];
+
+    const refreshedGuests = refreshGuestRoster(currentGuests, candidates);
+
+    expect(refreshedGuests[0]).toMatchObject({
+      id: "imported-row",
+      checkInState: "not_entered",
+      name: "Ava S.",
+    });
+  });
+});
+
+describe("mergeLocalGuestProgressIntoHostGuests", () => {
+  it("pushes local entered progress into the host roster without replacing host details", () => {
+    const hostGuests = [makeGuest("host-row", "not fully paid")];
+    const localGuests: Guest[] = [
+      {
+        ...makeGuest("local-row", "full"),
+        amountPaid: 100,
+        checkInState: "entered",
+        enteredAt: "2026-06-01T10:00:00.000Z",
+      },
+    ];
+
+    const mergedGuests = mergeLocalGuestProgressIntoHostGuests(hostGuests, localGuests);
+
+    expect(mergedGuests[0]).toMatchObject({
+      id: "host-row",
+      checkInState: "entered",
+      enteredAt: "2026-06-01T10:00:00.000Z",
+      payment: "full",
+    });
+    expect(mergedGuests[0]?.amountPaid).toBeUndefined();
+  });
+
+  it("does not downgrade host progress from stale local storage", () => {
+    const hostGuests: Guest[] = [
+      {
+        ...makeGuest("host-row", "full"),
+        checkInState: "left",
+        enteredAt: "2026-06-01T10:00:00.000Z",
+        leftAt: "2026-06-01T11:00:00.000Z",
+      },
+    ];
+    const localGuests: Guest[] = [
+      {
+        ...makeGuest("local-row", "not fully paid"),
+        checkInState: "entered",
+        enteredAt: "2026-06-01T10:30:00.000Z",
+      },
+    ];
+
+    const mergedGuests = mergeLocalGuestProgressIntoHostGuests(hostGuests, localGuests);
+
+    expect(mergedGuests[0]).toMatchObject({
+      checkInState: "left",
+      leftAt: "2026-06-01T11:00:00.000Z",
+      payment: "full",
+    });
+  });
+
+  it("skips local phone-only recovery when duplicate host rows are ambiguous", () => {
+    const hostGuests: Guest[] = [
+      makeGuest("first-host-row", "not fully paid"),
+      {
+        ...makeGuest("second-host-row", "not fully paid"),
+        name: "Avery Stone",
+      },
+    ];
+    const localGuests: Guest[] = [
+      {
+        ...makeGuest("local-row", "not fully paid"),
+        name: "Ava S.",
+        checkInState: "entered",
+        enteredAt: "2026-06-01T10:00:00.000Z",
+      },
+    ];
+
+    const mergedGuests = mergeLocalGuestProgressIntoHostGuests(hostGuests, localGuests);
+
+    expect(mergedGuests[0]).toBe(hostGuests[0]);
+    expect(mergedGuests[1]).toBe(hostGuests[1]);
+    expect(mergedGuests.every((guest) => guest.checkInState === "not_entered")).toBe(true);
   });
 });
 
