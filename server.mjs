@@ -1220,6 +1220,10 @@ function getRosterIdentityKey(guest) {
   return JSON.stringify([guest.normalizedPhoneNumber, normalizeGuestName(guest.name)]);
 }
 
+function getRosterPhoneKey(guest) {
+  return guest.normalizedPhoneNumber;
+}
+
 function normalizeGuestName(name) {
   return String(name ?? "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
