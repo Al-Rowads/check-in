@@ -125,10 +125,12 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
       try {
         await saveGuestsToHost(mergedGuests, authToken);
 
-        if (guestsRef.current === localGuests || guestsRef.current === mergedGuests) {
-          hasUnsavedHostChangesRef.current = false;
-          pendingRosterFileRef.current = null;
+        if (guestsRef.current !== localGuests && guestsRef.current !== mergedGuests) {
+          return null;
         }
+
+        hasUnsavedHostChangesRef.current = false;
+        pendingRosterFileRef.current = null;
 
         return mergedGuests;
       } catch (error) {
