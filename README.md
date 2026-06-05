@@ -195,10 +195,11 @@ are persisted on the host filesystem:
 - `data/google-sheet-downloads/` stores timestamped Google Sheet download history.
 - `data/google-sheet-sync.json` stores the configured public sheet link and last sync status.
 
-If the host API is unavailable, the app falls back to `localStorage`. Browser
-storage is local to that device and can be cleared by the user or browser
-settings. The prototype login is still frontend-only, so run host persistence
-only on a trusted network or behind a real authenticated backend.
+The frontend reads guest data from the host API only. Browser storage is used
+only for the current auth session (`event-check-in:auth-session`). If the host
+API is unavailable, the app shows a backend error state without rendering failed
+guest data. Expired or unauthorized sessions are cleared and require login
+again.
 
 Google Sheets sync settings:
 
@@ -217,7 +218,6 @@ npm run build
 
 ## Future Backend Upgrade
 
-- Move authentication and authorization to a backend.
 - Store rosters and check-in events in a database.
 - Add import audit logs and per-admin activity history.
 - Add server-side duplicate handling and validation.

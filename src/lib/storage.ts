@@ -1,27 +1,5 @@
 import type { Guest } from "../types/guest";
 
-export const GUEST_STORAGE_KEY = "event-check-in:guests";
-
-export function loadGuestsFromStorage(): Guest[] {
-  const stored = localStorage.getItem(GUEST_STORAGE_KEY);
-
-  if (!stored) {
-    return [];
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(stored);
-
-    return parseStoredGuests(parsed);
-  } catch {
-    return [];
-  }
-}
-
-export function saveGuestsToStorage(guests: Guest[]): void {
-  localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(guests));
-}
-
 export function parseStoredGuests(value: unknown): Guest[] {
   if (!Array.isArray(value)) {
     return [];

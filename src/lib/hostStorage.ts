@@ -59,6 +59,17 @@ export async function loginToHost(
   return payload;
 }
 
+export async function logoutFromHost(authToken: string): Promise<void> {
+  const response = await fetch(apiUrl("/api/session"), {
+    headers: authHeaders(authToken),
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    throw await toHostRequestError(response, "Host logout failed.");
+  }
+}
+
 export async function loadGuestsFromHost(authToken: string): Promise<Guest[]> {
   const response = await fetch(apiUrl("/api/guests"), {
     cache: "no-store",
@@ -78,7 +89,7 @@ export async function loadGuestsFromHost(authToken: string): Promise<Guest[]> {
   return parseStoredGuests(payload.guests);
 }
 
-export async function saveGuestsToHost(guests: Guest[], authToken: string): Promise<void> {
+export async function saveGuestsToHost(guests: Guest[], authToken: string): Promise<Guest[]> {
   const response = await fetch(apiUrl("/api/guests"), {
     body: JSON.stringify({ guests }),
     headers: {
@@ -91,6 +102,14 @@ export async function saveGuestsToHost(guests: Guest[], authToken: string): Prom
   if (!response.ok) {
     throw await toHostRequestError(response, "Guest changes could not be saved on the host.");
   }
+
+  const payload: unknown = await response.json();
+
+  if (!isRecord(payload)) {
+    throw new Error("Host guest storage returned an invalid save response.");
+  }
+
+  return parseStoredGuests(payload.guests);
 }
 
 export async function saveUploadedRosterToHost(

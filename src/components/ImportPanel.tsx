@@ -74,12 +74,21 @@ export function ImportPanel({ onImport, onSyncGoogleSheet, onToast }: ImportPane
 
       const importResult = await onImport(result.guests, file);
 
+      if (!importResult.savedToHost) {
+        onToast({
+          title: "Import not saved",
+          description: "The backend API did not confirm the roster update.",
+          tone: "error",
+        });
+        return;
+      }
+
       setSummary({
         importedCount: importResult.importedCount,
       });
       onToast({
         title: "Roster refreshed",
-        description: `${importResult.importedCount} ${importResult.importedCount === 1 ? "guest is" : "guests are"} in the active roster. ${importResult.savedToHost ? "Saved on host." : "Saved in this browser only."}`,
+        description: `${importResult.importedCount} ${importResult.importedCount === 1 ? "guest is" : "guests are"} in the active roster. Saved on the backend.`,
         tone: "success",
       });
       clearFileInput();
@@ -116,8 +125,8 @@ export function ImportPanel({ onImport, onSyncGoogleSheet, onToast }: ImportPane
 
       if (!result.savedToHost) {
         onToast({
-          title: "Host storage unavailable",
-          description: "Log out and log back in through the Docker-hosted app to sync from Google Sheets.",
+          title: "Backend API unavailable",
+          description: "Log out and log back in after the backend is available to sync from Google Sheets.",
           tone: "error",
         });
         return;

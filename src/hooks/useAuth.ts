@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
-import { AUTH_STORAGE_KEY, STATIC_USERS, type UserRole } from "../config/auth";
-import { HostRequestError, isUnauthorizedHostError, loginToHost } from "../lib/hostStorage";
+import { useCallback, useState } from "react";
+import type { UserRole } from "../config/auth";
+import { HostRequestError, loginToHost, logoutFromHost } from "../lib/hostStorage";
+
+const authStorageKey = "event-check-in:auth-session";
 
 export type AuthSession = {
   username: string;
   role: UserRole;
-  token?: string;
+  token: string;
 };
 
 export type LoginResult =
@@ -16,39 +18,32 @@ export function useAuth() {
   const [session, setSession] = useState<AuthSession | null>(() => loadAuthSession());
   const isAuthenticated = session !== null;
 
-  useEffect(() => {
-    if (session) {
-      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
-    } else {
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-    }
-  }, [session]);
-
   const login = useCallback(async (username: string, password: string): Promise<LoginResult> => {
-    const staticSession = authenticateStaticUser(username, password);
-
     try {
       const hostSession = await loginToHost(username.trim(), password);
+
+      saveAuthSession(hostSession);
       setSession(hostSession);
 
       return { ok: true };
     } catch (error) {
-      if (staticSession && canUseStaticFallback(error)) {
-        setSession(staticSession);
-
-        return { ok: true };
-      }
+      return {
+        ok: false,
+        message: getLoginErrorMessage(error),
+      };
     }
-
-    return {
-      ok: false,
-      message: "Invalid username or password.",
-    };
   }, []);
 
   const logout = useCallback(() => {
+    const authToken = session?.token;
+
+    clearAuthSession();
     setSession(null);
-  }, []);
+
+    if (authToken) {
+      void logoutFromHost(authToken).catch(() => undefined);
+    }
+  }, [session?.token]);
 
   return {
     isAuthenticated,
@@ -58,69 +53,76 @@ export function useAuth() {
   };
 }
 
-function authenticateStaticUser(username: string, password: string): AuthSession | null {
-  const trimmedUsername = username.trim();
-  const user = STATIC_USERS.find(
-    (currentUser) =>
-      currentUser.username === trimmedUsername && currentUser.password === password,
-  );
-
-  if (!user) {
-    return null;
-  }
-
-  return {
-    role: user.role,
-    username: user.username,
-  };
-}
-
-function canUseStaticFallback(error: unknown): boolean {
-  if (isUnauthorizedHostError(error)) {
-    return false;
-  }
-
-  if (error instanceof HostRequestError) {
-    return error.statusCode === 404;
-  }
-
-  return true;
-}
-
 function loadAuthSession(): AuthSession | null {
-  const storedSession = localStorage.getItem(AUTH_STORAGE_KEY);
+  const storedSession = readStoredAuthSession();
 
   if (!storedSession) {
-    return null;
-  }
-
-  if (storedSession === "authenticated") {
     return null;
   }
 
   try {
     const parsed: unknown = JSON.parse(storedSession);
 
-    if (!parsed || typeof parsed !== "object") {
-      return null;
+    if (isAuthSession(parsed)) {
+      return parsed;
     }
+  } catch {
+    // Invalid saved auth is cleared below.
+  }
 
-    const session = parsed as Partial<AuthSession>;
+  clearAuthSession();
+  return null;
+}
 
-    if (
-      typeof session.username === "string" &&
-      (session.role === "admin" || session.role === "user") &&
-      typeof session.token === "string"
-    ) {
-      return {
-        role: session.role,
-        token: session.token,
-        username: session.username,
-      };
-    }
+function readStoredAuthSession(): string | null {
+  try {
+    return localStorage.getItem(authStorageKey);
   } catch {
     return null;
   }
+}
 
-  return null;
+function saveAuthSession(session: AuthSession): void {
+  try {
+    localStorage.setItem(
+      authStorageKey,
+      JSON.stringify({
+        role: session.role,
+        token: session.token,
+        username: session.username,
+      }),
+    );
+  } catch {
+    // Keep the in-memory session when browser storage is unavailable.
+  }
+}
+
+function clearAuthSession(): void {
+  try {
+    localStorage.removeItem(authStorageKey);
+  } catch {
+    // Nothing to clear when browser storage is unavailable.
+  }
+}
+
+function isAuthSession(value: unknown): value is AuthSession {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const session = value as Partial<AuthSession>;
+
+  return (
+    typeof session.username === "string" &&
+    (session.role === "admin" || session.role === "user") &&
+    typeof session.token === "string"
+  );
+}
+
+function getLoginErrorMessage(error: unknown): string {
+  if (error instanceof HostRequestError) {
+    return error.message;
+  }
+
+  return "The backend API is unavailable. Start the host server and try again.";
 }

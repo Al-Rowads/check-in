@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { ADMIN_CREDENTIALS } from "../config/auth";
+import { DEFAULT_USERNAME } from "../config/auth";
 import { Button } from "./Button";
 import { Field, TextInput } from "./Field";
 
@@ -11,7 +11,7 @@ type LoginScreenProps = {
 };
 
 export function LoginScreen({ onLogin }: LoginScreenProps) {
-  const [username, setUsername] = useState<string>(ADMIN_CREDENTIALS.username);
+  const [username, setUsername] = useState<string>(DEFAULT_USERNAME);
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);

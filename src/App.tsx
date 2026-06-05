@@ -18,7 +18,7 @@ export function App() {
     logout();
     addToast({
       title: "Log in again",
-      description: "The host session expired after the server restarted.",
+      description: "The saved host session expired.",
       tone: "warning",
     });
   }, [addToast, logout]);
@@ -40,12 +40,21 @@ export function App() {
     }
   }, [isAuthenticated]);
 
-  function handleStateChange(guestId: string, nextState: CheckInState) {
+  async function handleStateChange(guestId: string, nextState: CheckInState) {
     const guest = guests.find((currentGuest) => currentGuest.id === guestId);
-    setCheckInState(guestId, nextState);
+    const saved = await setCheckInState(guestId, nextState);
     searchInputRef.current?.focus();
 
     if (!guest) {
+      return;
+    }
+
+    if (!saved) {
+      addToast({
+        title: "Could not save",
+        description: "The backend API did not confirm the guest update.",
+        tone: "error",
+      });
       return;
     }
 
@@ -56,12 +65,21 @@ export function App() {
     });
   }
 
-  function handleMarkPaid(guestId: string) {
+  async function handleMarkPaid(guestId: string) {
     const guest = guests.find((currentGuest) => currentGuest.id === guestId);
-    markGuestPaid(guestId);
+    const saved = await markGuestPaid(guestId);
     searchInputRef.current?.focus();
 
     if (!guest) {
+      return;
+    }
+
+    if (!saved) {
+      addToast({
+        title: "Could not save",
+        description: "The backend API did not confirm the payment update.",
+        tone: "error",
+      });
       return;
     }
 
@@ -171,11 +189,11 @@ function getStateToastTitle(state: CheckInState): string {
 function getStorageModeLabel(storageMode: ReturnType<typeof useGuests>["storageMode"]): string {
   switch (storageMode) {
     case "checking":
-      return "Checking storage";
+      return "Checking backend";
     case "host":
-      return "Host saved";
-    case "local":
-      return "Local only";
+      return "Backend synced";
+    case "error":
+      return "Backend unavailable";
   }
 }
 

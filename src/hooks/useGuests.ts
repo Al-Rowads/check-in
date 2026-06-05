@@ -4,7 +4,6 @@ import {
   createGuestId,
   getGuestStats,
   markGuestPaymentFull,
-  mergeLocalGuestProgressIntoHostGuests,
   refreshGuestRoster,
   updateGuestCheckInState,
 } from "../lib/guest";
@@ -17,7 +16,6 @@ import {
   saveGuestsToHost,
   saveUploadedRosterToHost,
 } from "../lib/hostStorage";
-import { loadGuestsFromStorage, saveGuestsToStorage } from "../lib/storage";
 import type { AuthSession } from "./useAuth";
 
 export type ImportGuestsResult = {
@@ -30,7 +28,7 @@ export type GoogleSheetSyncResult = {
   savedToHost: boolean;
 };
 
-export type StorageMode = "checking" | "host" | "local";
+export type StorageMode = "checking" | "host" | "error";
 
 const hostRefreshIntervalMs = 5 * 60 * 1000;
 
@@ -40,114 +38,86 @@ type UseGuestsOptions = {
 
 export function useGuests(authSession: AuthSession | null, options: UseGuestsOptions = {}) {
   const { onHostSessionExpired } = options;
-  const [guests, setGuests] = useState<Guest[]>(() => loadGuestsFromStorage());
+  const [guests, setGuests] = useState<Guest[]>([]);
   const [storageMode, setStorageMode] = useState<StorageMode>("checking");
   const [googleSheetSync, setGoogleSheetSync] = useState<GoogleSheetSyncStatus | null>(null);
-  const guestsRef = useRef(guests);
+  const guestsRef = useRef<Guest[]>([]);
   const authTokenRef = useRef(authSession?.token ?? "");
   const hostStorageAvailableRef = useRef(false);
-  const hasUnsavedHostChangesRef = useRef(false);
-  const pendingRosterFileRef = useRef<File | null>(null);
+  const pendingHostSaveCountRef = useRef(0);
   const stats = useMemo(() => getGuestStats(guests), [guests]);
 
   useEffect(() => {
     authTokenRef.current = authSession?.token ?? "";
   }, [authSession?.token]);
 
-  const disableHostStorage = useCallback(() => {
-    hostStorageAvailableRef.current = false;
-    setStorageMode("local");
+  const setHostGuests = useCallback((nextGuests: Guest[]) => {
+    guestsRef.current = nextGuests;
+    setGuests(nextGuests);
   }, []);
 
   const handleHostStorageError = useCallback(
     (error: unknown) => {
-      if (isUnauthorizedHostError(error)) {
-        hostStorageAvailableRef.current = false;
-        setStorageMode("local");
-        onHostSessionExpired?.();
-        return;
-      }
+      hostStorageAvailableRef.current = false;
+      setStorageMode("error");
 
-      disableHostStorage();
+      if (isUnauthorizedHostError(error)) {
+        setHostGuests([]);
+        setGoogleSheetSync(null);
+        onHostSessionExpired?.();
+      }
     },
-    [disableHostStorage, onHostSessionExpired],
+    [onHostSessionExpired, setHostGuests],
   );
 
-  const storeGuestsLocally = useCallback((nextGuests: Guest[]) => {
-    guestsRef.current = nextGuests;
-    setGuests(nextGuests);
-    saveGuestsToStorage(nextGuests);
-  }, []);
-
   const persistGuestsToHost = useCallback(
-    async (nextGuests: Guest[]): Promise<boolean> => {
+    async (nextGuests: Guest[]): Promise<Guest[] | null> => {
       const authToken = authTokenRef.current;
 
       if (!hostStorageAvailableRef.current || !authToken) {
-        return false;
+        return null;
       }
+
+      pendingHostSaveCountRef.current += 1;
 
       try {
-        await saveGuestsToHost(nextGuests, authToken);
-        if (guestsRef.current === nextGuests) {
-          hasUnsavedHostChangesRef.current = false;
-        }
-        return true;
-      } catch (error) {
-        handleHostStorageError(error);
-        return false;
-      }
-    },
-    [handleHostStorageError],
-  );
+        const savedGuests = await saveGuestsToHost(nextGuests, authToken);
 
-  const applyGuestChanges = useCallback(
-    (nextGuests: Guest[]) => {
-      hasUnsavedHostChangesRef.current = true;
-      storeGuestsLocally(nextGuests);
-      void persistGuestsToHost(nextGuests);
-    },
-    [persistGuestsToHost, storeGuestsLocally],
-  );
+        hostStorageAvailableRef.current = true;
+        setStorageMode("host");
+        setHostGuests(savedGuests);
 
-  const pushLocalProgressToHost = useCallback(
-    async (hostGuests: Guest[], authToken: string): Promise<Guest[] | null> => {
-      const localGuests = guestsRef.current;
-      const mergedGuests = mergeLocalGuestProgressIntoHostGuests(hostGuests, localGuests);
-      const hasLocalProgress = mergedGuests.some((guest, index) => guest !== hostGuests[index]);
-
-      if (!hasLocalProgress) {
-        return hostGuests;
-      }
-
-      hasUnsavedHostChangesRef.current = true;
-
-      try {
-        await saveGuestsToHost(mergedGuests, authToken);
-
-        if (guestsRef.current !== localGuests && guestsRef.current !== mergedGuests) {
-          return null;
-        }
-
-        hasUnsavedHostChangesRef.current = false;
-        pendingRosterFileRef.current = null;
-
-        return mergedGuests;
+        return savedGuests;
       } catch (error) {
         handleHostStorageError(error);
         return null;
+      } finally {
+        pendingHostSaveCountRef.current = Math.max(0, pendingHostSaveCountRef.current - 1);
       }
     },
-    [handleHostStorageError],
+    [handleHostStorageError, setHostGuests],
+  );
+
+  const applyGuestChanges = useCallback(
+    async (nextGuests: Guest[]) => {
+      const savedGuests = await persistGuestsToHost(nextGuests);
+
+      return savedGuests !== null;
+    },
+    [persistGuestsToHost],
   );
 
   useEffect(() => {
     let isMounted = true;
     const authToken = authSession?.token;
 
+    hostStorageAvailableRef.current = false;
+    pendingHostSaveCountRef.current = 0;
+    setHostGuests([]);
+    setGoogleSheetSync(null);
+
     if (!authToken) {
-      hostStorageAvailableRef.current = false;
-      setStorageMode("local");
+      setStorageMode("checking");
       return () => {
         isMounted = false;
       };
@@ -156,51 +126,26 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
     setStorageMode("checking");
 
     loadGuestsFromHost(authToken)
-      .then(async (hostGuests) => {
+      .then((hostGuests) => {
         if (!isMounted) {
           return;
         }
 
         hostStorageAvailableRef.current = true;
         setStorageMode("host");
+        setHostGuests(hostGuests);
 
         void loadGoogleSheetSyncStatus(authToken)
-          .then(setGoogleSheetSync)
-          .catch(handleHostStorageError);
-
-        if (hasUnsavedHostChangesRef.current) {
-          const pendingRosterFile = pendingRosterFileRef.current;
-          const nextGuests = guestsRef.current;
-
-          if (!pendingRosterFile) {
-            const syncedGuests = await pushLocalProgressToHost(hostGuests, authToken);
-
-            if (isMounted && syncedGuests) {
-              storeGuestsLocally(syncedGuests);
+          .then((sync) => {
+            if (isMounted) {
+              setGoogleSheetSync(sync);
             }
-
-            return;
-          }
-
-          void Promise.all([
-            saveGuestsToHost(nextGuests, authToken),
-            saveUploadedRosterToHost(pendingRosterFile, authToken),
-          ])
-            .then(() => {
-              if (guestsRef.current === nextGuests) {
-                hasUnsavedHostChangesRef.current = false;
-                pendingRosterFileRef.current = null;
-              }
-            })
-            .catch(handleHostStorageError);
-          return;
-        }
-
-        const syncedGuests = await pushLocalProgressToHost(hostGuests, authToken);
-
-        if (isMounted && syncedGuests) {
-          storeGuestsLocally(syncedGuests);
-        }
+          })
+          .catch((error) => {
+            if (isMounted) {
+              handleHostStorageError(error);
+            }
+          });
       })
       .catch((error) => {
         if (isMounted) {
@@ -211,13 +156,7 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
     return () => {
       isMounted = false;
     };
-  }, [
-    authSession?.token,
-    handleHostStorageError,
-    persistGuestsToHost,
-    pushLocalProgressToHost,
-    storeGuestsLocally,
-  ]);
+  }, [authSession?.token, handleHostStorageError, setHostGuests]);
 
   useEffect(() => {
     if (storageMode !== "host") {
@@ -225,21 +164,24 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
     }
 
     const refreshFromHost = () => {
-      if (hasUnsavedHostChangesRef.current) {
+      if (pendingHostSaveCountRef.current > 0) {
         return;
       }
 
       const authToken = authTokenRef.current;
 
       if (!authToken) {
-        disableHostStorage();
+        hostStorageAvailableRef.current = false;
+        setStorageMode("error");
+        setHostGuests([]);
+        setGoogleSheetSync(null);
         return;
       }
 
       void Promise.all([loadGuestsFromHost(authToken), loadGoogleSheetSyncStatus(authToken)])
         .then(([hostGuests, sync]) => {
-          if (!hasUnsavedHostChangesRef.current) {
-            storeGuestsLocally(hostGuests);
+          if (pendingHostSaveCountRef.current === 0) {
+            setHostGuests(hostGuests);
             setGoogleSheetSync(sync);
           }
         })
@@ -248,45 +190,51 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
     const interval = window.setInterval(refreshFromHost, hostRefreshIntervalMs);
 
     return () => window.clearInterval(interval);
-  }, [disableHostStorage, handleHostStorageError, storageMode, storeGuestsLocally]);
+  }, [handleHostStorageError, storageMode, setHostGuests]);
 
   const importGuests = useCallback(
     async (candidates: GuestImportCandidate[], rosterFile: File): Promise<ImportGuestsResult> => {
+      const authToken = authTokenRef.current;
+
+      if (!hostStorageAvailableRef.current || !authToken) {
+        return {
+          importedCount: guestsRef.current.length,
+          savedToHost: false,
+        };
+      }
+
       const candidatesWithIds = candidates.map<GuestImportCandidate>((candidate) => ({
         ...candidate,
         id: candidate.id ?? createGuestId(candidate.normalizedPhoneNumber),
       }));
       const nextGuests = refreshGuestRoster(guestsRef.current, candidatesWithIds);
-      let savedToHost = false;
 
-      hasUnsavedHostChangesRef.current = true;
-      pendingRosterFileRef.current = rosterFile;
-      storeGuestsLocally(nextGuests);
+      pendingHostSaveCountRef.current += 1;
 
-      const authToken = authTokenRef.current;
+      try {
+        await saveUploadedRosterToHost(rosterFile, authToken);
+        const savedGuests = await saveGuestsToHost(nextGuests, authToken);
 
-      if (hostStorageAvailableRef.current && authToken) {
-        try {
-          await Promise.all([
-            saveGuestsToHost(nextGuests, authToken),
-            saveUploadedRosterToHost(rosterFile, authToken),
-          ]);
-          savedToHost = true;
-          if (guestsRef.current === nextGuests) {
-            hasUnsavedHostChangesRef.current = false;
-            pendingRosterFileRef.current = null;
-          }
-        } catch (error) {
-          handleHostStorageError(error);
-        }
+        hostStorageAvailableRef.current = true;
+        setStorageMode("host");
+        setHostGuests(savedGuests);
+
+        return {
+          importedCount: savedGuests.length,
+          savedToHost: true,
+        };
+      } catch (error) {
+        handleHostStorageError(error);
+
+        return {
+          importedCount: guestsRef.current.length,
+          savedToHost: false,
+        };
+      } finally {
+        pendingHostSaveCountRef.current = Math.max(0, pendingHostSaveCountRef.current - 1);
       }
-
-      return {
-        importedCount: nextGuests.length,
-        savedToHost,
-      };
     },
-    [handleHostStorageError, storeGuestsLocally],
+    [handleHostStorageError, setHostGuests],
   );
 
   const syncGoogleSheetUrl = useCallback(
@@ -310,9 +258,9 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
       try {
         const result = await saveGoogleSheetSyncUrl(url, authToken);
 
-        hasUnsavedHostChangesRef.current = false;
-        pendingRosterFileRef.current = null;
-        storeGuestsLocally(result.guests);
+        hostStorageAvailableRef.current = true;
+        setStorageMode("host");
+        setHostGuests(result.guests);
         setGoogleSheetSync(result.sync);
 
         return {
@@ -332,24 +280,28 @@ export function useGuests(authSession: AuthSession | null, options: UseGuestsOpt
         };
       }
     },
-    [handleHostStorageError, storeGuestsLocally],
+    [handleHostStorageError, setHostGuests],
   );
 
-  const setCheckInState = useCallback((guestId: string, nextState: CheckInState) => {
-    applyGuestChanges(
-      guestsRef.current.map((guest) =>
-        guest.id === guestId ? updateGuestCheckInState(guest, nextState) : guest,
+  const setCheckInState = useCallback(
+    async (guestId: string, nextState: CheckInState): Promise<boolean> =>
+      applyGuestChanges(
+        guestsRef.current.map((guest) =>
+          guest.id === guestId ? updateGuestCheckInState(guest, nextState) : guest,
+        ),
       ),
-    );
-  }, [applyGuestChanges]);
+    [applyGuestChanges],
+  );
 
-  const markGuestPaid = useCallback((guestId: string) => {
-    applyGuestChanges(
-      guestsRef.current.map((guest) =>
-        guest.id === guestId ? markGuestPaymentFull(guest) : guest,
+  const markGuestPaid = useCallback(
+    async (guestId: string): Promise<boolean> =>
+      applyGuestChanges(
+        guestsRef.current.map((guest) =>
+          guest.id === guestId ? markGuestPaymentFull(guest) : guest,
+        ),
       ),
-    );
-  }, [applyGuestChanges]);
+    [applyGuestChanges],
+  );
 
   return {
     guests,
