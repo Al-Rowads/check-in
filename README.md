@@ -112,7 +112,7 @@ Default admin credentials:
 
 ```text
 Username: admin
-Password: checkin2026
+Password: checkin2026!Alrowads
 ```
 
 Default normal user credentials:

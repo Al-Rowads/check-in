@@ -43,7 +43,7 @@ afterEach(async () => {
 describe("server guest state actions", () => {
   it("keeps check-ins from concurrent stale devices using the same user account", async () => {
     const server = await setupServer();
-    const adminToken = await login(server, "admin", "checkin2026");
+    const adminToken = await login(server, "admin", "checkin2026!Alrowads");
     const firstUserToken = await login(server, "user", "user2026");
     const secondUserToken = await login(server, "user", "user2026");
 
@@ -88,7 +88,7 @@ describe("server guest state actions", () => {
 
   it("rejects invalid check-in states and unknown guest IDs", async () => {
     const server = await setupServer();
-    const adminToken = await login(server, "admin", "checkin2026");
+    const adminToken = await login(server, "admin", "checkin2026!Alrowads");
     const userToken = await login(server, "user", "user2026");
 
     await putGuests(server, adminToken, [makeGuest("guest-1", "Ava Stone")]);
@@ -111,7 +111,7 @@ describe("server guest state actions", () => {
 
   it("generates entered timestamps on the server and ignores client timestamps", async () => {
     const server = await setupServer();
-    const adminToken = await login(server, "admin", "checkin2026");
+    const adminToken = await login(server, "admin", "checkin2026!Alrowads");
     const userToken = await login(server, "user", "user2026");
     const clientTimestamp = "2000-01-01T00:00:00.000Z";
 
@@ -136,7 +136,7 @@ describe("server guest state actions", () => {
 
   it("preserves the original entered timestamp on duplicate entered actions", async () => {
     const server = await setupServer();
-    const adminToken = await login(server, "admin", "checkin2026");
+    const adminToken = await login(server, "admin", "checkin2026!Alrowads");
     const userToken = await login(server, "user", "user2026");
 
     await putGuests(server, adminToken, [makeGuest("guest-1", "Ava Stone")]);
@@ -154,7 +154,7 @@ describe("server guest state actions", () => {
 
   it("allows normal users to reset check-in state and clears timestamps", async () => {
     const server = await setupServer();
-    const adminToken = await login(server, "admin", "checkin2026");
+    const adminToken = await login(server, "admin", "checkin2026!Alrowads");
     const userToken = await login(server, "user", "user2026");
 
     await putGuests(server, adminToken, [
@@ -177,7 +177,7 @@ describe("server guest state actions", () => {
 
   it("preserves payment and check-in changes made concurrently", async () => {
     const server = await setupServer();
-    const adminToken = await login(server, "admin", "checkin2026");
+    const adminToken = await login(server, "admin", "checkin2026!Alrowads");
     const firstUserToken = await login(server, "user", "user2026");
     const secondUserToken = await login(server, "user", "user2026");
 
@@ -202,7 +202,7 @@ describe("server guest state actions", () => {
 
   it("keeps backend progress when an admin saves a stale roster", async () => {
     const server = await setupServer();
-    const adminToken = await login(server, "admin", "checkin2026");
+    const adminToken = await login(server, "admin", "checkin2026!Alrowads");
     const userToken = await login(server, "user", "user2026");
 
     await putGuests(server, adminToken, [makeGuest("guest-1", "Ava Stone")]);
@@ -224,7 +224,7 @@ describe("server guest state actions", () => {
 
   it("exports only entered guests as CSV for admins", async () => {
     const server = await setupServer();
-    const adminToken = await login(server, "admin", "checkin2026");
+    const adminToken = await login(server, "admin", "checkin2026!Alrowads");
 
     await putGuests(server, adminToken, [
       {

@@ -10,7 +10,7 @@ services:
       PORT: 4173
       CHECKIN_DATA_DIR: /app/data
       CHECKIN_ADMIN_USERNAME: admin
-      CHECKIN_ADMIN_PASSWORD: checkin2026
+      CHECKIN_ADMIN_PASSWORD: checkin2026!Alrowads
       CHECKIN_USER_USERNAME: user
       CHECKIN_USER_PASSWORD: user2026
       CHECKIN_GOOGLE_SHEET_URL: https://docs.google.com/spreadsheets/d/1VF6IKmYBQzLBrHDNk9OFFraaI0KQlp5kkEkmBTfQhLQ/edit?usp=drivesdk

@@ -23,7 +23,7 @@ const googleSheetFetchTimeoutMs = Number(
 );
 const staticUsers = [
   {
-    password: process.env.CHECKIN_ADMIN_PASSWORD ?? "checkin2026",
+    password: process.env.CHECKIN_ADMIN_PASSWORD ?? "checkin2026!Alrowads",
     role: "admin",
     username: process.env.CHECKIN_ADMIN_USERNAME ?? "admin",
   },
