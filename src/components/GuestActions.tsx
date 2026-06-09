@@ -1,9 +1,11 @@
 import type { CheckInState, Guest } from "../types/guest";
 import { Button } from "./Button";
+import { CheckCircle2, CreditCard, RotateCcw } from "lucide-react";
 
 type GuestActionsProps = {
   guest: Guest;
   isMarkingEntered?: boolean;
+  isResetting?: boolean;
   onStateChange: (guestId: string, nextState: CheckInState) => void;
   onMarkPaid: (guestId: string) => void;
 };
@@ -11,6 +13,7 @@ type GuestActionsProps = {
 export function GuestActions({
   guest,
   isMarkingEntered = false,
+  isResetting = false,
   onMarkPaid,
   onStateChange,
 }: GuestActionsProps) {
@@ -18,29 +21,33 @@ export function GuestActions({
     <div className="flex flex-wrap gap-2">
       <Button
         aria-busy={isMarkingEntered}
-        className="min-w-[7.75rem]"
+        className="min-w-[8.5rem]"
         disabled={guest.checkInState === "entered" || isMarkingEntered}
+        icon={<CheckCircle2 aria-hidden="true" className="size-4" />}
+        isLoading={isMarkingEntered}
         onClick={() => onStateChange(guest.id, "entered")}
         size="sm"
       >
-        {isMarkingEntered ? (
-          <span
-            aria-hidden="true"
-            className="mr-2 size-4 rounded-full border-2 border-white/40 border-t-white animate-spin"
-          />
-        ) : null}
-        Mark entered
+        {isMarkingEntered ? "Marking" : "Mark entered"}
       </Button>
       <Button
-        disabled={guest.checkInState === "not_entered"}
+        aria-busy={isResetting}
+        disabled={guest.checkInState === "not_entered" || isResetting}
+        icon={<RotateCcw aria-hidden="true" className="size-4" />}
+        isLoading={isResetting}
         onClick={() => onStateChange(guest.id, "not_entered")}
         size="sm"
         variant="ghost"
       >
-        Reset
+        {isResetting ? "Resetting" : "Reset"}
       </Button>
       {guest.payment === "not fully paid" ? (
-        <Button onClick={() => onMarkPaid(guest.id)} size="sm" variant="secondary">
+        <Button
+          icon={<CreditCard aria-hidden="true" className="size-4" />}
+          onClick={() => onMarkPaid(guest.id)}
+          size="sm"
+          variant="secondary"
+        >
           Mark paid
         </Button>
       ) : null}

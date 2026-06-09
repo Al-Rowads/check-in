@@ -1,10 +1,12 @@
 import { KeyboardEvent, RefObject, useMemo, useState } from "react";
+import { Download, Search, TicketCheck, UsersRound } from "lucide-react";
 import type { CheckInState, Guest } from "../types/guest";
 import { sortGuestsForDesk } from "../lib/guest";
 import { searchGuests } from "../lib/search";
 import { Button } from "./Button";
 import { Field, TextInput } from "./Field";
 import { GuestList } from "./GuestList";
+import { Panel, SectionHeader, StatusPill } from "./ui";
 
 type GuestSearchProps = {
   guests: Guest[];
@@ -31,6 +33,7 @@ export function GuestSearch({
     [guests, query],
   );
   const limitedMatches = query.trim() ? matches.slice(0, 24) : [];
+  const hasQuery = Boolean(query.trim());
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key !== "Enter" || limitedMatches.length !== 1) {
@@ -49,56 +52,70 @@ export function GuestSearch({
 
   return (
     <section aria-labelledby="guest-search-heading" className="grid gap-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-sm font-bold uppercase text-teal-700">
-            Check-in
-          </p>
-          <h2 className="text-2xl font-bold text-stone-950" id="guest-search-heading">
-            Guest search
-          </h2>
-        </div>
-        {onExportEnteredCsv ? (
-          <div className="flex flex-wrap items-center gap-3">
-            {query.trim() ? (
-              <p className="text-sm font-semibold text-stone-600">
-                {matches.length} {matches.length === 1 ? "match" : "matches"}
-              </p>
-            ) : null}
+      <SectionHeader
+        action={
+          onExportEnteredCsv ? (
             <Button
-              disabled={isExportingEnteredCsv}
+              icon={<Download aria-hidden="true" className="size-4" />}
+              isLoading={isExportingEnteredCsv}
               onClick={onExportEnteredCsv}
               size="sm"
               variant="secondary"
             >
-              {isExportingEnteredCsv ? "Exporting..." : "Export entered CSV"}
+              {isExportingEnteredCsv ? "Exporting" : "Export entered CSV"}
             </Button>
-          </div>
-        ) : query.trim() ? (
-          <p className="text-sm font-semibold text-stone-600">
-            {matches.length} {matches.length === 1 ? "match" : "matches"}
-          </p>
-        ) : null}
-      </div>
+          ) : null
+        }
+        description="Search by guest name or exact phone, then commit entry from the result row."
+        eyebrow="Check-in"
+        icon={<TicketCheck aria-hidden="true" className="size-4" />}
+        title="Guest search"
+        titleId="guest-search-heading"
+      />
 
-      <Field label="Search by name or phone number">
-        <TextInput
-          autoComplete="off"
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="Start typing a guest name or exact phone"
-          ref={inputRef}
-          value={query}
-        />
-      </Field>
+      <Panel className="grid gap-4" tone="accent">
+        <Field
+          hint={limitedMatches.length === 1 ? "Press Enter to mark entered" : undefined}
+          label="Search by name or phone number"
+        >
+          <div className="relative">
+            <Search
+              aria-hidden="true"
+              className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-alrowad-orange"
+            />
+            <TextInput
+              autoComplete="off"
+              className="min-h-14 border-alrowad-orange/28 bg-black/48 pl-12 text-lg"
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Start typing a guest name or exact phone"
+              ref={inputRef}
+              value={query}
+            />
+          </div>
+        </Field>
+
+        <div className="flex flex-wrap gap-2">
+          <StatusPill icon={<UsersRound aria-hidden="true" className="size-4" />} tone="orange">
+            {hasQuery
+              ? `${matches.length} ${matches.length === 1 ? "match" : "matches"}`
+              : `${guests.length} guests ready`}
+          </StatusPill>
+          {hasQuery && matches.length > limitedMatches.length ? (
+            <StatusPill tone="neutral">Showing first {limitedMatches.length}</StatusPill>
+          ) : null}
+        </div>
+      </Panel>
 
       <GuestList
         emptyDescription={
-          query.trim()
+          hasQuery
             ? "No guests match that search."
-            : "Import a guest list, then search from this desk view."
+            : guests.length > 0
+              ? "Start typing to search the active roster."
+              : "Import a guest list, then search from this desk view."
         }
-        emptyTitle={query.trim() ? "No matches" : "Ready for guest lookup"}
+        emptyTitle={hasQuery ? "No matches" : "Ready for guest lookup"}
         guests={limitedMatches}
         isCheckInActionPending={isCheckInActionPending}
         layout="compact"

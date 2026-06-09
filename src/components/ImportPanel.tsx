@@ -1,9 +1,18 @@
 import { ChangeEvent, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  FileSpreadsheet,
+  Link,
+  RefreshCw,
+  Upload,
+} from "lucide-react";
 import type { GuestImportCandidate, ImportError } from "../types/guest";
 import { parseRosterFile } from "../lib/excel";
 import type { GoogleSheetSyncResult, ImportGuestsResult } from "../hooks/useGuests";
 import { Button } from "./Button";
 import { Field, TextInput } from "./Field";
+import { Panel, SectionHeader, StatusPill } from "./ui";
 
 type ImportPanelProps = {
   onImport: (guests: GuestImportCandidate[], rosterFile: File) => Promise<ImportGuestsResult>;
@@ -159,28 +168,37 @@ export function ImportPanel({ onImport, onSyncGoogleSheet, onToast }: ImportPane
 
   return (
     <section aria-labelledby="import-heading" className="grid gap-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-sm font-bold uppercase text-teal-700">Roster</p>
-          <h2 className="text-2xl font-bold text-stone-950" id="import-heading">
-            Roster upload
-          </h2>
-        </div>
-      </div>
+      <SectionHeader
+        description="Upload a roster file or sync a public Google Sheet for the active event."
+        eyebrow="Roster"
+        icon={<FileSpreadsheet aria-hidden="true" className="size-4" />}
+        title="Roster upload"
+        titleId="import-heading"
+      />
 
-      <div className="rounded-md border border-stone-200 bg-white p-4 shadow-sm sm:p-5">
+      <Panel className="grid gap-5" tone="default">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <p className="font-bold text-stone-950">
-              {fileName ? fileName : "Choose a guest list"}
-            </p>
-            <p className="mt-1 text-sm text-stone-600">
-              Accepted formats: .xlsx, .xls, .csv
-            </p>
+          <div className="flex min-w-0 gap-3">
+            <div className="grid size-12 shrink-0 place-items-center rounded-md border border-alrowad-orange/25 bg-alrowad-orange/10 text-alrowad-orange">
+              <Upload aria-hidden="true" className="size-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="font-semibold text-alrowad-white">
+                {fileName ? fileName : "Choose a guest list"}
+              </p>
+              <p className="mt-1 text-sm text-white/52">
+                Accepted formats: .xlsx, .xls, .csv
+              </p>
+            </div>
           </div>
 
-          <label className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-md border border-stone-300 bg-white px-4 text-sm font-bold text-stone-900 transition hover:border-stone-400 hover:bg-stone-50">
-            {isParsing ? "Reading file..." : "Select file"}
+          <label className="inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-md border border-white/14 bg-white/[0.075] px-4 text-sm font-semibold text-alrowad-white transition hover:border-white/22 hover:bg-white/[0.11]">
+            {isParsing ? (
+              <RefreshCw aria-hidden="true" className="size-4 animate-spin" />
+            ) : (
+              <Upload aria-hidden="true" className="size-4" />
+            )}
+            {isParsing ? "Reading file" : "Select file"}
             <input
               accept=".xlsx,.xls,.csv"
               className="sr-only"
@@ -192,48 +210,61 @@ export function ImportPanel({ onImport, onSyncGoogleSheet, onToast }: ImportPane
           </label>
         </div>
 
-        <div className="mt-5 grid gap-3 border-t border-stone-200 pt-4">
+        <div className="grid gap-3 border-t border-white/10 pt-5">
           <Field label="Google Sheets">
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-              <TextInput
-                onChange={(event) => setGoogleSheetUrl(event.target.value)}
-                placeholder="https://docs.google.com/spreadsheets/..."
-                type="url"
-                value={googleSheetUrl}
-              />
+              <div className="relative">
+                <Link
+                  aria-hidden="true"
+                  className="pointer-events-none absolute left-3 top-1/2 size-5 -translate-y-1/2 text-white/36"
+                />
+                <TextInput
+                  className="pl-11"
+                  onChange={(event) => setGoogleSheetUrl(event.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/..."
+                  type="url"
+                  value={googleSheetUrl}
+                />
+              </div>
               <Button
                 disabled={isParsing || isSyncingSheet}
+                icon={<RefreshCw aria-hidden="true" className="size-4" />}
+                isLoading={isSyncingSheet}
                 onClick={handleGoogleSheetSync}
                 type="button"
               >
-                {isSyncingSheet ? "Syncing..." : "Sync"}
+                {isSyncingSheet ? "Syncing" : "Sync"}
               </Button>
             </div>
           </Field>
         </div>
 
         {summary ? (
-          <div className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <StatusPill
+            icon={<CheckCircle2 aria-hidden="true" className="size-4" />}
+            tone="success"
+          >
             <strong>{summary.importedCount}</strong>{" "}
-            {summary.importedCount === 1 ? "guest is" : "guests are"} in the active roster.
-          </div>
+            {summary.importedCount === 1 ? "guest is" : "guests are"} in the active roster
+          </StatusPill>
         ) : null}
 
         {errors.length > 0 ? (
-          <div className="mt-4 rounded-md border border-rose-200 bg-rose-50">
-            <div className="border-b border-rose-200 px-4 py-3">
-              <p className="font-bold text-rose-950">Import errors</p>
+          <div className="overflow-hidden rounded-lg border border-alrowad-red/38 bg-alrowad-red/12">
+            <div className="flex items-center gap-2 border-b border-alrowad-red/24 px-4 py-3">
+              <AlertTriangle aria-hidden="true" className="size-4 text-red-100" />
+              <p className="font-semibold text-red-50">Import errors</p>
             </div>
-            <ul className="max-h-72 divide-y divide-rose-100 overflow-auto">
+            <ul className="max-h-72 divide-y divide-alrowad-red/18 overflow-auto">
               {errors.slice(0, 50).map((error) => (
-                <li className="px-4 py-3 text-sm text-rose-900" key={error.rowNumber}>
+                <li className="px-4 py-3 text-sm leading-6 text-red-50" key={error.rowNumber}>
                   <strong>Row {error.rowNumber}:</strong> {error.messages.join(" ")}
                 </li>
               ))}
             </ul>
           </div>
         ) : null}
-      </div>
+      </Panel>
     </section>
   );
 }

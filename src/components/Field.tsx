@@ -3,15 +3,19 @@ import { cn } from "../lib/cn";
 
 type FieldProps = {
   label: string;
+  hint?: string | undefined;
   children: ReactNode;
 };
 
-export function Field({ label, children }: FieldProps) {
+export function Field({ label, hint, children }: FieldProps) {
   return (
-    <label className="grid gap-2 text-sm font-semibold text-stone-800">
-      <span>{label}</span>
-      {children}
-    </label>
+    <div className="grid gap-2">
+      <label className="grid gap-2 text-sm font-semibold text-white/76">
+        <span>{label}</span>
+        {children}
+      </label>
+      {hint ? <p className="text-xs font-semibold text-white/42">{hint}</p> : null}
+    </div>
   );
 }
 
@@ -20,7 +24,7 @@ export const TextInput = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLIn
   return (
     <input
       className={cn(
-        "min-h-11 w-full rounded-md border border-stone-300 bg-white px-3 text-base text-stone-950 shadow-sm transition placeholder:text-stone-400 hover:border-stone-400",
+        "min-h-11 w-full rounded-md border border-white/12 bg-black/35 px-3 text-base text-alrowad-white shadow-inset transition placeholder:text-white/30 hover:border-white/22",
         className,
       )}
       ref={ref}

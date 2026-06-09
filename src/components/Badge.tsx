@@ -11,13 +11,13 @@ type BadgeProps = {
 };
 
 const toneClasses: Record<BadgeTone, string> = {
-  neutral: "border-stone-300 bg-stone-100 text-stone-700",
-  vip: "border-amber-300 bg-amber-100 text-amber-900",
-  normal: "border-sky-200 bg-sky-100 text-sky-800",
-  success: "border-emerald-200 bg-emerald-100 text-emerald-800",
-  warning: "border-orange-200 bg-orange-100 text-orange-800",
-  muted: "border-stone-200 bg-white text-stone-600",
-  danger: "border-rose-200 bg-rose-100 text-rose-800",
+  neutral: "border-white/12 bg-white/[0.055] text-white/68",
+  vip: "border-alrowad-blue/50 bg-alrowad-blue/30 text-blue-100",
+  normal: "border-white/12 bg-white/[0.07] text-white/74",
+  success: "border-emerald-400/30 bg-emerald-400/12 text-emerald-100",
+  warning: "border-alrowad-flame/30 bg-alrowad-flame/12 text-orange-100",
+  muted: "border-white/10 bg-transparent text-white/48",
+  danger: "border-alrowad-red/36 bg-alrowad-red/14 text-red-100",
 };
 
 export function Badge({ children, tone = "neutral", className }: BadgeProps) {

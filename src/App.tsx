@@ -1,4 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Clock3,
+  DatabaseZap,
+  LogOut,
+  ShieldCheck,
+  UserRoundCog,
+  UsersRound,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
 import type { CheckInState } from "./types/guest";
 import { useAuth } from "./hooks/useAuth";
 import { useGuests } from "./hooks/useGuests";
@@ -10,6 +20,7 @@ import { GuestSearch } from "./components/GuestSearch";
 import { ImportPanel } from "./components/ImportPanel";
 import { LoginScreen } from "./components/LoginScreen";
 import { ToastViewport } from "./components/ToastViewport";
+import { BrandMark, StatusPill } from "./components/ui";
 
 export function App() {
   const { toasts, addToast, dismissToast } = useToasts();
@@ -182,27 +193,49 @@ export function App() {
 
   return (
     <>
-      <div className="min-h-screen">
-        <header className="border-b border-stone-200 bg-white/88 backdrop-blur">
-          <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
-            <div>
-              <p className="text-sm font-bold uppercase text-teal-700">
-                {isAdmin ? "Admin panel" : "Check-in panel"}
-              </p>
-              <h1 className="text-3xl font-bold text-stone-950">Event check-in desk</h1>
+      <div className="min-h-screen bg-alrowad-black text-alrowad-white">
+        <header className="top-0 z-40 border-b border-white/10 bg-black/92 backdrop-blur lg:sticky">
+          <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8">
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center">
+              <BrandMark compact />
+              <div className="hidden h-10 w-px bg-white/10 sm:block" />
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-alrowad-orange">
+                  {isAdmin ? "Admin panel" : "Check-in panel"}
+                </p>
+                <h1 className="mt-1 text-xl font-semibold text-alrowad-white sm:text-2xl">
+                  Event check-in desk
+                </h1>
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-semibold text-stone-700">
+              <StatusPill
+                icon={
+                  isAdmin ? (
+                    <UserRoundCog aria-hidden="true" className="size-4" />
+                  ) : (
+                    <ShieldCheck aria-hidden="true" className="size-4" />
+                  )
+                }
+                tone={isAdmin ? "orange" : "neutral"}
+              >
                 {getRoleLabel(session?.role)}
-              </div>
-              <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-semibold text-stone-700">
+              </StatusPill>
+              <StatusPill icon={<UsersRound aria-hidden="true" className="size-4" />}>
                 {guests.length} registered
-              </div>
-              <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-semibold text-stone-700">
+              </StatusPill>
+              <StatusPill
+                icon={getStorageModeIcon(storageMode, pendingHostActionCount)}
+                tone={getStorageModeTone(storageMode, pendingHostActionCount)}
+              >
                 {getStorageModeLabel(storageMode, pendingHostActionCount)}
-              </div>
-              <Button onClick={handleLogout} variant="secondary">
+              </StatusPill>
+              <Button
+                icon={<LogOut aria-hidden="true" className="size-4" />}
+                onClick={handleLogout}
+                variant="secondary"
+              >
                 Log out
               </Button>
             </div>
@@ -215,17 +248,10 @@ export function App() {
           <div
             className={
               isAdmin
-                ? "grid gap-8 xl:grid-cols-[minmax(0,0.78fr)_minmax(0,1.22fr)] xl:items-start"
+                ? "grid gap-8 xl:grid-cols-[minmax(0,1.22fr)_minmax(22rem,0.78fr)] xl:items-start"
                 : "grid gap-8"
             }
           >
-            {isAdmin ? (
-              <ImportPanel
-                onImport={importGuests}
-                onSyncGoogleSheet={syncGoogleSheetUrl}
-                onToast={addToast}
-              />
-            ) : null}
             <GuestSearch
               guests={guests}
               inputRef={searchInputRef}
@@ -239,6 +265,13 @@ export function App() {
                   }
                 : {})}
             />
+            {isAdmin ? (
+              <ImportPanel
+                onImport={importGuests}
+                onSyncGoogleSheet={syncGoogleSheetUrl}
+                onToast={addToast}
+              />
+            ) : null}
           </div>
 
           <FullGuestList
@@ -306,6 +339,42 @@ function getStorageModeLabel(
       return "Backend synced";
     case "error":
       return "Backend unavailable";
+  }
+}
+
+function getStorageModeIcon(
+  storageMode: ReturnType<typeof useGuests>["storageMode"],
+  pendingHostActionCount: number,
+) {
+  if (pendingHostActionCount > 0) {
+    return <DatabaseZap aria-hidden="true" className="size-4" />;
+  }
+
+  switch (storageMode) {
+    case "checking":
+      return <Clock3 aria-hidden="true" className="size-4" />;
+    case "host":
+      return <Wifi aria-hidden="true" className="size-4" />;
+    case "error":
+      return <WifiOff aria-hidden="true" className="size-4" />;
+  }
+}
+
+function getStorageModeTone(
+  storageMode: ReturnType<typeof useGuests>["storageMode"],
+  pendingHostActionCount: number,
+): "neutral" | "orange" | "success" | "warning" | "danger" | "blue" {
+  if (pendingHostActionCount > 0) {
+    return "warning";
+  }
+
+  switch (storageMode) {
+    case "checking":
+      return "neutral";
+    case "host":
+      return "success";
+    case "error":
+      return "danger";
   }
 }
 
